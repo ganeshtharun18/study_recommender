@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import axios, { AxiosError } from "axios";
 import { jwtVerify, JWTPayload } from 'jose';
+import { useNavigate } from "react-router-dom";
 
 // Types
 export type UserRole = "student" | "teacher" | "admin";
@@ -24,19 +25,20 @@ interface AuthContextType {
   refreshSession: () => Promise<boolean>;
   updateUser: (updatedUser: Partial<User>) => void;
   isRefreshing: boolean;
+  authErrors: Array<{ timestamp: Date; message: string; type: string }>;
 }
 
 // Context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Configuration - Must match your Flask backend's SECRET_KEY exactly
+// Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 const JWT_SECRET = new TextEncoder().encode(
-  import.meta.env.VITE_JWT_SECRET || 'your_secret_key' // Must match Flask SECRET_KEY
+  import.meta.env.VITE_JWT_SECRET || 'your_secret_key'
 );
 
 // Axios instance
-const api = axios.create({
+export const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,
   headers: {
     "Content-Type": "application/json",
@@ -57,6 +59,36 @@ interface JwtPayload extends JWTPayload {
   jti?: string;
 }
 
+// Token utilities
+const validateTokenStructure = (token: string | null): boolean => {
+  if (!token) return false;
+  try {
+    const parts = token.split('.');
+    return parts.length === 3 && 
+           parts[0].length > 10 && 
+           parts[1].length > 10 && 
+           parts[2].length > 10;
+  } catch {
+    return false;
+  }
+};
+
+const storeTokens = (accessToken: string, refreshToken: string): void => {
+  if (!validateTokenStructure(accessToken)) {
+    throw new Error('Invalid access token structure');
+  }
+  if (!validateTokenStructure(refreshToken)) {
+    throw new Error('Invalid refresh token structure');
+  }
+  localStorage.setItem("accessToken", accessToken);
+  localStorage.setItem("refreshToken", refreshToken);
+};
+
+const getAccessToken = (): string | null => {
+  const token = localStorage.getItem("accessToken");
+  return validateTokenStructure(token) ? token : null;
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,40 +96,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [authErrors, setAuthErrors] = useState<Array<{ timestamp: Date; message: string; type: string }>>([]);
+  
+  // Navigation will be handled by components, not in the context
+  // Removed direct useNavigate from context
 
-  // Enhanced token verification
+  const addAuthError = useCallback((message: string, type: string) => {
+    setAuthErrors(prev => [...prev, {
+      timestamp: new Date(),
+      message,
+      type
+    }].slice(-20));
+  }, []);
+
   const verifyToken = useCallback(async (token: string | null): Promise<JwtPayload | null> => {
     if (!token) return null;
 
     try {
       const { payload } = await jwtVerify(token, JWT_SECRET, {
-        algorithms: ['HS256'] // Must match backend algorithm
+        algorithms: ['HS256']
       });
 
       const decoded = payload as JwtPayload;
 
-      // Validate required fields
       if (!decoded.user_id || !decoded.email || !decoded.role) {
-        console.error('Token missing required fields');
+        addAuthError('Token missing required fields', 'token_validation');
         return null;
       }
 
-      // Validate role
       if (!['student', 'teacher', 'admin'].includes(decoded.role)) {
-        console.error('Invalid role in token');
+        addAuthError('Invalid role in token', 'token_validation');
         return null;
       }
 
       return decoded;
     } catch (error) {
-      console.error('Token verification failed:', error);
+      addAuthError(`Token verification failed: ${error}`, 'token_validation');
       return null;
     }
-  }, []);
+  }, [addAuthError]);
 
-  // Handle token refresh
+  const logout = useCallback(async (callApi: boolean = true): Promise<void> => {
+    try {
+      if (callApi && refreshToken) {
+        await api.post("/auth/logout", { refreshToken });
+      }
+    } catch (error) {
+      addAuthError(`Logout API failed: ${error}`, 'auth_logout');
+    } finally {
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("user");
+      delete api.defaults.headers.common['Authorization'];
+      setUser(null);
+      setAccessToken(null);
+      setRefreshToken(null);
+      setError(null);
+      // Removed navigation from context
+    }
+  }, [refreshToken, addAuthError]);
+
   const handleRefreshToken = useCallback(async (): Promise<boolean> => {
     if (!refreshToken) {
+      addAuthError('No refresh token available', 'token_refresh');
       await logout();
       return false;
     }
@@ -113,92 +174,81 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const decoded = await verifyToken(newAccessToken);
       if (!decoded || decoded.type !== 'access') {
+        addAuthError('Invalid refreshed token', 'token_refresh');
         throw new Error('Invalid refreshed token');
       }
 
-      // Validate user data matches token
       if (decoded.user_id !== userData.id || decoded.email !== userData.email) {
+        addAuthError('User data mismatch after refresh', 'token_refresh');
         throw new Error('User data mismatch');
       }
 
-      localStorage.setItem("accessToken", newAccessToken);
+      storeTokens(newAccessToken, refreshToken);
       localStorage.setItem("user", JSON.stringify(userData));
       setAccessToken(newAccessToken);
       setUser(userData);
       
       return true;
     } catch (error) {
-      console.error("Refresh token failed:", error);
+      addAuthError(`Refresh failed: ${error}`, 'token_refresh');
       await logout();
       return false;
     } finally {
       setIsRefreshing(false);
     }
-  }, [refreshToken, verifyToken]);
+  }, [refreshToken, verifyToken, logout, addAuthError]);
 
   const refreshSession = useCallback(async (): Promise<boolean> => {
     return handleRefreshToken();
   }, [handleRefreshToken]);
 
-  // Initialize auth state
   const initializeAuth = useCallback(async () => {
     try {
       setLoading(true);
-      const storedAccessToken = localStorage.getItem("accessToken");
+      const token = getAccessToken();
       const storedRefreshToken = localStorage.getItem("refreshToken");
       const storedUser = localStorage.getItem("user");
 
-      if (storedAccessToken) {
-        const decoded = await verifyToken(storedAccessToken);
-        
-        if (!decoded || decoded.type !== 'access') {
-          throw new Error('Invalid stored token');
-        }
-
-        const userData = storedUser 
-          ? JSON.parse(storedUser) 
-          : {
-              id: decoded.user_id,
-              name: decoded.name,
-              email: decoded.email,
-              role: decoded.role,
-            };
-
-        setAccessToken(storedAccessToken);
-        setRefreshToken(storedRefreshToken);
-        setUser(userData);
+      if (!token) {
+        throw new Error('No access token found');
       }
+
+      const decoded = await verifyToken(token);
+      if (!decoded || decoded.type !== 'access') {
+        throw new Error('Invalid token payload');
+      }
+
+      if (decoded.exp && Date.now() >= decoded.exp * 1000) {
+        throw new Error('Token expired');
+      }
+
+      const userData = storedUser 
+        ? JSON.parse(storedUser)
+        : {
+            id: decoded.user_id,
+            name: decoded.name,
+            email: decoded.email,
+            role: decoded.role,
+          };
+
+      if (userData.id !== decoded.user_id || userData.email !== decoded.email) {
+        throw new Error('User data mismatch');
+      }
+
+      setAccessToken(token);
+      setRefreshToken(storedRefreshToken);
+      setUser(userData);
     } catch (error) {
-      console.error("Auth initialization failed:", error);
+      addAuthError(`Init failed: ${error}`, 'auth_init');
       await logout(false);
     } finally {
       setLoading(false);
     }
-  }, [verifyToken]);
+  }, [verifyToken, logout, addAuthError]);
 
   useEffect(() => {
     initializeAuth();
   }, [initializeAuth]);
-
-  // Logout function
-  const logout = useCallback(async (callApi: boolean = true): Promise<void> => {
-    try {
-      if (callApi && refreshToken) {
-        await api.post("/auth/logout", { refreshToken });
-      }
-    } catch (error) {
-      console.error("Logout API call failed:", error);
-    } finally {
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("user");
-      delete api.defaults.headers.common['Authorization'];
-      setUser(null);
-      setAccessToken(null);
-      setRefreshToken(null);
-      setError(null);
-    }
-  }, [refreshToken]);
 
   // Axios request interceptor
   useEffect(() => {
@@ -208,15 +258,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return config;
         }
 
-        if (accessToken) {
-          config.headers.Authorization = `Bearer ${accessToken}`;
+        const token = getAccessToken();
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
           return config;
         }
 
         if (refreshToken && !isRefreshing) {
           const success = await refreshSession();
-          if (success && accessToken) {
-            config.headers.Authorization = `Bearer ${accessToken}`;
+          if (success) {
+            const newToken = getAccessToken();
+            if (newToken) {
+              config.headers.Authorization = `Bearer ${newToken}`;
+            }
           }
         }
 
@@ -228,7 +282,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       api.interceptors.request.eject(requestInterceptor);
     };
-  }, [accessToken, refreshToken, isRefreshing, refreshSession]);
+  }, [refreshToken, isRefreshing, refreshSession]);
 
   // Axios response interceptor
   useEffect(() => {
@@ -244,12 +298,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             !isRefreshing) {
           try {
             const success = await refreshSession();
-            if (success && originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-              return api(originalRequest);
+            if (success) {
+              const newToken = getAccessToken();
+              if (newToken && originalRequest.headers) {
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                return api(originalRequest);
+              }
             }
           } catch (refreshError) {
-            console.error("Token refresh failed:", refreshError);
+            addAuthError(`Refresh failed in interceptor: ${refreshError}`, 'token_refresh');
             await logout();
           }
         }
@@ -261,9 +318,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       api.interceptors.response.eject(responseInterceptor);
     };
-  }, [accessToken, isRefreshing, refreshSession, logout]);
+  }, [isRefreshing, refreshSession, logout, addAuthError]);
 
-  // Login function
+  // Token monitoring
+  useEffect(() => {
+    const checkToken = () => {
+      const token = getAccessToken();
+      if (!token && user) {
+        addAuthError('Token missing while authenticated', 'token_monitor');
+        logout();
+      }
+    };
+    
+    const interval = setInterval(checkToken, 30000);
+    return () => clearInterval(interval);
+  }, [user, logout, addAuthError]);
+
   const login = async (email: string, password: string): Promise<void> => {
     setLoading(true);
     setError(null);
@@ -275,9 +345,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user: User;
       }>("/auth/login", { email, password });
 
-      const { accessToken: newAccessToken, refreshToken: newRefreshToken, user: userData } = response.data;
+      const { accessToken, refreshToken, user: userData } = response.data;
       
-      const decoded = await verifyToken(newAccessToken);
+      if (!validateTokenStructure(accessToken)) {
+        throw new Error('Invalid access token received');
+      }
+      if (!validateTokenStructure(refreshToken)) {
+        throw new Error('Invalid refresh token received');
+      }
+
+      const decoded = await verifyToken(accessToken);
       if (!decoded || decoded.type !== 'access') {
         throw new Error('Invalid login token');
       }
@@ -286,24 +363,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('User data mismatch');
       }
 
-      localStorage.setItem("accessToken", newAccessToken);
-      localStorage.setItem("refreshToken", newRefreshToken);
+      storeTokens(accessToken, refreshToken);
       localStorage.setItem("user", JSON.stringify(userData));
       
-      setAccessToken(newAccessToken);
-      setRefreshToken(newRefreshToken);
+      setAccessToken(accessToken);
+      setRefreshToken(refreshToken);
       setUser(userData);
+      // Removed navigation from context
+      return Promise.resolve();
     } catch (error) {
       const err = error as AxiosError<{ error?: string }>;
       const errorMessage = err.response?.data?.error || err.message || "Login failed";
       setError(errorMessage);
-      throw error;
+      addAuthError(`Login failed: ${errorMessage}`, 'auth_login');
+      return Promise.reject(error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Register function
   const register = async (
     name: string,
     email: string,
@@ -315,18 +393,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     try {
       await api.post("/auth/register", { name, email, password, role });
-      await login(email, password);
+      // Removed automatic login after registration
+      return Promise.resolve();
     } catch (error) {
       const err = error as AxiosError<{ error?: string }>;
       const errorMessage = err.response?.data?.error || err.message || "Registration failed";
       setError(errorMessage);
-      throw error;
+      addAuthError(`Registration failed: ${errorMessage}`, 'auth_register');
+      return Promise.reject(error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Update user data
   const updateUser = useCallback((updatedUser: Partial<User>): void => {
     if (!user) return;
     
@@ -346,6 +425,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshSession,
     updateUser,
     isRefreshing,
+    authErrors,
   };
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
@@ -361,16 +441,17 @@ export const useAuth = (): AuthContextType => {
 
 export const useProtectedRoute = (requiredRole?: UserRole, redirectPath = "/login") => {
   const { user, isAuthenticated, loading, isRefreshing } = useAuth();
+  const navigate = useNavigate();
   
   useEffect(() => {
     if (loading || isRefreshing) return;
 
     if (!isAuthenticated) {
-      window.location.href = redirectPath;
+      navigate(redirectPath);
     } else if (requiredRole && user?.role !== requiredRole) {
-      window.location.href = "/unauthorized";
+      navigate("/unauthorized");
     }
-  }, [user, isAuthenticated, loading, requiredRole, isRefreshing, redirectPath]);
+  }, [user, isAuthenticated, loading, requiredRole, isRefreshing, navigate, redirectPath]);
 
   return { user, loading: loading || isRefreshing };
 };
