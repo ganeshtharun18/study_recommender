@@ -7,8 +7,9 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
-// Configure axios base URL
-axios.defaults.baseURL = 'http://localhost:5000';
+// Configure axios
+axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+axios.defaults.headers.common['Content-Type'] = 'application/json';
 
 interface Quiz {
   id: string;
@@ -44,13 +45,18 @@ const Quizzes = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [upcomingLoading, setUpcomingLoading] = useState(true);
-  const [completedLoading, setCompletedLoading] = useState(true);
+  const [loading, setLoading] = useState({
+    upcoming: true,
+    completed: true,
+    starting: false
+  });
   const [error, setError] = useState("");
 
   useEffect(() => {
     const fetchQuizzes = async () => {
       try {
+        setError("");
+        
         // Fetch all questions to use as upcoming quizzes
         const questionsResponse = await axios.get<{ data: ApiQuiz[] }>(
           "http://localhost:5000/api/quiz/questions",
@@ -78,10 +84,10 @@ const Quizzes = () => {
         const upcomingQuizzes = Object.entries(questionsByTopic).map(([topic, questions]) => ({
           id: `topic-${topic}`,
           title: topic,
-          subject: "General", // Default subject
+          subject: "General",
           questions: questions.length,
-          timeLimit: 30, // Default time limit
-          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Due in 7 days
+          timeLimit: 30,
+          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
           status: "upcoming" as const,
         }));
 
@@ -96,9 +102,9 @@ const Quizzes = () => {
             completedQuizzes = completedResponse.data.data.map((result) => ({
               id: `completed-${result.id}`,
               title: result.topic,
-              subject: "General", // Default subject
-              questions: 10, // Default question count
-              timeLimit: 30, // Default time limit
+              subject: "General",
+              questions: 10,
+              timeLimit: 30,
               dueDate: result.attempted_at,
               status: "completed" as const,
               score: result.score,
@@ -112,9 +118,9 @@ const Quizzes = () => {
           ? err.response?.data?.message || err.message
           : "Failed to fetch quizzes";
         setError(message);
+        console.error("Fetch error:", err);
       } finally {
-        setUpcomingLoading(false);
-        setCompletedLoading(false);
+        setLoading(prev => ({ ...prev, upcoming: false, completed: false }));
       }
     };
 
@@ -131,13 +137,13 @@ const Quizzes = () => {
     });
   };
 
-  const upcomingQuizzes = quizzes.filter(quiz => quiz.status === "upcoming");
-  const completedQuizzes = quizzes.filter(quiz => quiz.status === "completed");
-
-const startQuiz = async (quizId: string) => {
+  const startQuiz = async (quizId: string) => {
     try {
+      setLoading(prev => ({ ...prev, starting: true }));
+      setError("");
+      
       const topic = quizId.replace('topic-', '');
-      const response = await axios.get(`https://localhost:5000/api/quiz/questions/${topic}`);
+      const response = await axios.get(`http://localhost:5000/api/quiz/questions/${topic}`);
       
       if (!response.data?.data) {
         throw new Error("Invalid questions data structure");
@@ -146,28 +152,31 @@ const startQuiz = async (quizId: string) => {
       navigate(`/quizzes/${topic}`, { 
         state: { questions: response.data.data }
       });
-      
     } catch (err) {
-      console.error("Failed to start quiz", err);
-      alert("Failed to start quiz. Please try again.");
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || err.message
+        : "Failed to start quiz";
+      setError(message);
+      console.error("Quiz start error:", err);
+    } finally {
+      setLoading(prev => ({ ...prev, starting: false }));
     }
   };
 
   const viewResults = async (quizId: string) => {
     try {
-      // Extract the result ID from the quizId
       const resultId = quizId.replace('completed-', '');
-      
-      // Navigate to results page
       navigate(`/results/${resultId}`);
-      
     } catch (err) {
-      console.error("Failed to view results", err);
-      alert("Failed to load results. Please try again.");
+      setError("Failed to load results. Please try again.");
+      console.error("Results error:", err);
     }
   };
 
-  if (upcomingLoading || completedLoading) {
+  const upcomingQuizzes = quizzes.filter(quiz => quiz.status === "upcoming");
+  const completedQuizzes = quizzes.filter(quiz => quiz.status === "completed");
+
+  if (loading.upcoming || loading.completed) {
     return (
       <div className="flex justify-center items-center h-64">
         <p>Loading quizzes...</p>
@@ -177,8 +186,17 @@ const startQuiz = async (quizId: string) => {
 
   if (error) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <p className="text-red-500">{error}</p>
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <p className="text-red-500 text-lg">{error}</p>
+        <Button 
+          variant="outline"
+          onClick={() => {
+            setError("");
+            setLoading({ upcoming: true, completed: true, starting: false });
+          }}
+        >
+          Retry
+        </Button>
       </div>
     );
   }
@@ -221,8 +239,9 @@ const startQuiz = async (quizId: string) => {
                   <Button 
                     className="w-full bg-edu-primary hover:bg-edu-primary/90"
                     onClick={() => startQuiz(quiz.id)}
+                    disabled={loading.starting}
                   >
-                    Start Quiz
+                    {loading.starting ? "Loading..." : "Start Quiz"}
                   </Button>
                 </CardContent>
               </Card>

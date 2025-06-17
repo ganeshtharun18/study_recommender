@@ -12,8 +12,15 @@ CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:3000"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
+        "allow_headers": [
+            "Content-Type", 
+            "Authorization",
+            "Cache-Control",  # Add this line to allow Cache-Control header
+            "X-Requested-With"
+        ],
+        "supports_credentials": True,
+        "expose_headers": ["Content-Length"],
+        "max_age": 86400
     }
 })
 
