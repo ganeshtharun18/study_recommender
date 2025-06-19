@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 export type UserRole = "student" | "teacher" | "admin";
 
 interface User {
+  token: string;
   id: string;
   name: string;
   email: string;

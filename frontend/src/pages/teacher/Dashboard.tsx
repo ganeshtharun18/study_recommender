@@ -1,4 +1,3 @@
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -6,71 +5,214 @@ import { BarChart, Users, BookOpen, FileText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import axios from "axios";
+import { Skeleton } from "@/components/ui/skeleton";
 
-// Sample mock data for teacher dashboard
-const MOCK_STUDENT_STATS = {
-  total: 78,
-  active: 64,
-  avgProgress: 72,
-};
+interface TeachingMaterial {
+  id: string;
+  title: string;
+  subject: string;
+  views: number;
+  completions: number;
+  ratings: number;
+}
 
-const MOCK_TEACHING_MATERIALS = [
-  {
-    id: "tm1",
-    title: "Advanced Calculus Guide",
-    subject: "Mathematics",
-    views: 345,
-    completions: 128,
-    ratings: 4.7,
-  },
-  {
-    id: "tm2",
-    title: "Python Programming Handbook",
-    subject: "Computer Science",
-    views: 562,
-    completions: 213,
-    ratings: 4.9,
-  },
-  {
-    id: "tm3",
-    title: "Organic Chemistry Principles",
-    subject: "Chemistry",
-    views: 289,
-    completions: 98,
-    ratings: 4.5,
-  },
-];
+interface RecentActivity {
+  id: string;
+  type: string;
+  content: string;
+  time: string;
+}
 
-const MOCK_RECENT_ACTIVITIES = [
-  {
-    id: "a1",
-    type: "quiz_completed",
-    content: "12 students completed 'Introduction to AI' quiz",
-    time: "2 hours ago",
-  },
-  {
-    id: "a2",
-    type: "material_popular",
-    content: "'Database Design' has become your most viewed material",
-    time: "1 day ago",
-  },
-  {
-    id: "a3",
-    type: "student_joined",
-    content: "5 new students enrolled in your courses",
-    time: "2 days ago",
-  },
-  {
-    id: "a4",
-    type: "feedback_received",
-    content: "New feedback on 'Web Development' material",
-    time: "3 days ago",
-  },
-];
+interface StudentStats {
+  total: number;
+  active: number;
+  avgProgress: number;
+}
+
+interface SubjectProgress {
+  subject_id: string;
+  subject_name: string;
+  total_materials: number;
+  completed_materials: number;
+  completion_percentage: number;
+}
 
 const TeacherDashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [studentStats, setStudentStats] = useState<StudentStats>({ total: 0, active: 0, avgProgress: 0 });
+  const [teachingMaterials, setTeachingMaterials] = useState<TeachingMaterial[]>([]);
+  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
+  const [subjectProgress, setSubjectProgress] = useState<SubjectProgress[]>([]);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch all data in parallel
+        const [materialsRes, studentsRes, activitiesRes, progressRes] = await Promise.all([
+          axios.get('/api/material/materials'),
+          axios.get('/api/auth/students'), // You'll need to implement this endpoint
+          axios.get('/api/progress/recent-activities'), // You'll need to implement this endpoint
+          axios.get('/api/progress/subject-progress') // You'll need to implement this endpoint
+        ]);
+
+        setTeachingMaterials(materialsRes.data.data.map((mat: any) => ({
+          id: mat.id,
+          title: mat.title,
+          subject: mat.subject_id, // Adjust based on your actual data structure
+          views: mat.views || 0,
+          completions: mat.completions || 0,
+          ratings: mat.ratings || 0
+        })));
+
+        // Calculate student stats based on your actual data
+        const totalStudents = studentsRes.data.length;
+        const activeStudents = studentsRes.data.filter((s: any) => s.active).length;
+        const avgProgress = progressRes.data.reduce((acc: number, curr: any) => 
+          acc + curr.completion_percentage, 0) / (progressRes.data.length || 1);
+
+        setStudentStats({
+          total: totalStudents,
+          active: activeStudents,
+          avgProgress: Math.round(avgProgress)
+        });
+
+        setSubjectProgress(progressRes.data);
+
+        // Transform activities to match your UI
+        setRecentActivities(activitiesRes.data.map((act: any) => ({
+          id: act.id,
+          type: act.type,
+          content: act.content,
+          time: act.time
+        })));
+
+      } catch (error) {
+        console.error("Error fetching dashboard data:", error);
+        // You might want to show error notifications to the user
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96 mt-2" />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardContent className="py-6 flex items-center justify-between">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-6 w-16" />
+                </div>
+                <Skeleton className="h-8 w-8 rounded-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-6 w-64" />
+                <Skeleton className="h-4 w-96" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4">
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                    <div className="flex gap-4">
+                      {[...Array(3)].map((_, j) => (
+                        <div key={j} className="space-y-1">
+                          <Skeleton className="h-3 w-16" />
+                          <Skeleton className="h-4 w-12" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="pt-2 flex justify-between">
+                  <Skeleton className="h-10 w-40" />
+                  <Skeleton className="h-10 w-48" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-6 w-64" />
+                <Skeleton className="h-4 w-96" />
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-4 w-8" />
+                    </div>
+                    <Skeleton className="h-2 w-full" />
+                  </div>
+                ))}
+                <Skeleton className="h-10 w-full mt-6" />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-6 w-64" />
+                <Skeleton className="h-4 w-96" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex gap-3">
+                    <Skeleton className="h-9 w-9 rounded-full" />
+                    <div className="space-y-1">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-6 w-64" />
+                <Skeleton className="h-4 w-96" />
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3">
+                  {[...Array(4)].map((_, i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -86,7 +228,7 @@ const TeacherDashboard = () => {
           <CardContent className="py-6 flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Total Students</p>
-              <h3 className="text-2xl font-bold">{MOCK_STUDENT_STATS.total}</h3>
+              <h3 className="text-2xl font-bold">{studentStats.total}</h3>
             </div>
             <Users className="h-8 w-8 text-edu-primary opacity-80" />
           </CardContent>
@@ -96,9 +238,9 @@ const TeacherDashboard = () => {
           <CardContent className="py-6 flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Active Students</p>
-              <h3 className="text-2xl font-bold">{MOCK_STUDENT_STATS.active}</h3>
+              <h3 className="text-2xl font-bold">{studentStats.active}</h3>
               <p className="text-xs text-muted-foreground">
-                {Math.round((MOCK_STUDENT_STATS.active / MOCK_STUDENT_STATS.total) * 100)}% of total
+                {Math.round((studentStats.active / studentStats.total) * 100)}% of total
               </p>
             </div>
             <div className="h-8 w-8 rounded-full bg-edu-primary/20 flex items-center justify-center">
@@ -111,7 +253,7 @@ const TeacherDashboard = () => {
           <CardContent className="py-6 flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Published Materials</p>
-              <h3 className="text-2xl font-bold">{MOCK_TEACHING_MATERIALS.length}</h3>
+              <h3 className="text-2xl font-bold">{teachingMaterials.length}</h3>
             </div>
             <div className="h-8 w-8 rounded-full bg-edu-secondary/20 flex items-center justify-center">
               <BookOpen className="h-5 w-5 text-edu-secondary" />
@@ -123,7 +265,7 @@ const TeacherDashboard = () => {
           <CardContent className="py-6 flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Avg. Completion Rate</p>
-              <h3 className="text-2xl font-bold">{MOCK_STUDENT_STATS.avgProgress}%</h3>
+              <h3 className="text-2xl font-bold">{studentStats.avgProgress}%</h3>
             </div>
             <div className="h-8 w-8 rounded-full bg-edu-accent/20 flex items-center justify-center">
               <BarChart className="h-5 w-5 text-edu-accent" />
@@ -143,7 +285,7 @@ const TeacherDashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {MOCK_TEACHING_MATERIALS.map((material) => (
+                {teachingMaterials.map((material) => (
                   <div
                     key={material.id}
                     className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4"
@@ -174,7 +316,7 @@ const TeacherDashboard = () => {
                     <BookOpen className="h-4 w-4 mr-2" />
                     View All Materials
                   </Button>
-                  <Button className="bg-edu-primary" onClick={() => navigate("/upload")}>
+                  <Button className="bg-edu-primary" onClick={() => navigate("/teacher/upload")}>
                     <Upload className="h-4 w-4 mr-2" />
                     Upload New Material
                   </Button>
@@ -192,40 +334,21 @@ const TeacherDashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
-                <div>
-                  <div className="flex justify-between mb-1 text-sm">
-                    <span>Mathematics</span>
-                    <span className="font-medium">83%</span>
+                {subjectProgress.map((subject) => (
+                  <div key={subject.subject_id}>
+                    <div className="flex justify-between mb-1 text-sm">
+                      <span>{subject.subject_name}</span>
+                      <span className="font-medium">{subject.completion_percentage}%</span>
+                    </div>
+                    <Progress value={subject.completion_percentage} className="h-2" />
                   </div>
-                  <Progress value={83} className="h-2" />
-                </div>
-                <div>
-                  <div className="flex justify-between mb-1 text-sm">
-                    <span>Computer Science</span>
-                    <span className="font-medium">76%</span>
-                  </div>
-                  <Progress value={76} className="h-2" />
-                </div>
-                <div>
-                  <div className="flex justify-between mb-1 text-sm">
-                    <span>Chemistry</span>
-                    <span className="font-medium">65%</span>
-                  </div>
-                  <Progress value={65} className="h-2" />
-                </div>
-                <div>
-                  <div className="flex justify-between mb-1 text-sm">
-                    <span>Physics</span>
-                    <span className="font-medium">58%</span>
-                  </div>
-                  <Progress value={58} className="h-2" />
-                </div>
+                ))}
               </div>
 
               <Button 
                 variant="outline" 
                 className="mt-6 w-full" 
-                onClick={() => navigate("/students")}
+                onClick={() => navigate("/teacher/students")}
               >
                 <Users className="h-4 w-4 mr-2" />
                 View Student Details
@@ -242,7 +365,7 @@ const TeacherDashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {MOCK_RECENT_ACTIVITIES.map((activity) => (
+                {recentActivities.map((activity) => (
                   <div key={activity.id} className="flex gap-3">
                     <div 
                       className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${

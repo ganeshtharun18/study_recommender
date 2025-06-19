@@ -2,15 +2,39 @@ from flask import Blueprint, request, jsonify
 from database.db import get_db_connection
 from contextlib import closing
 import mysql.connector
+import os
+from werkzeug.utils import secure_filename
 
 bp = Blueprint('material', __name__, url_prefix='/api/material')
 
+# Configuration
+ALLOWED_EXTENSIONS = {'pdf'}
+UPLOAD_FOLDER = 'uploads'
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @bp.route('/upload', methods=['POST'])
 def upload_material():
-    required_fields = ['title', 'topic', 'type', 'url', 'uploaded_by']
-    data = request.json
-    
+    # Check if the post request has the file part
+    if 'file' not in request.files:
+        return jsonify({
+            "status": "error",
+            "message": "No file part"
+        }), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({
+            "status": "error",
+            "message": "No selected file"
+        }), 400
+
     # Validate required fields
+    required_fields = ['title', 'topic', 'type', 'uploaded_by', 'subject_id']
+    data = request.form
+    
     if not all(field in data for field in required_fields):
         return jsonify({
             "status": "error",
@@ -19,20 +43,36 @@ def upload_material():
         }), 400
 
     try:
+        # Process file upload
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            if not os.path.exists(UPLOAD_FOLDER):
+                os.makedirs(UPLOAD_FOLDER)
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(file_path)
+            url = f"/{UPLOAD_FOLDER}/{filename}"
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid file type"
+            }), 400
+
         with closing(get_db_connection()) as conn:
             with closing(conn.cursor()) as cursor:
                 sql = """
                     INSERT INTO study_materials 
-                    (title, topic, type, difficulty, url, uploaded_by)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (title, topic, type, difficulty, url, uploaded_by, subject_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """
+                
                 params = (
                     data['title'],
                     data['topic'],
                     data['type'],
                     data.get('difficulty', 'Medium'),
-                    data['url'],
-                    data['uploaded_by']
+                    url,
+                    data['uploaded_by'],
+                    data['subject_id']
                 )
                 
                 cursor.execute(sql, params)
@@ -41,7 +81,8 @@ def upload_material():
                 return jsonify({
                     "status": "success",
                     "message": "Material uploaded successfully",
-                    "material_id": cursor.lastrowid
+                    "material_id": cursor.lastrowid,
+                    "file_url": url
                 }), 201
 
     except mysql.connector.Error as e:

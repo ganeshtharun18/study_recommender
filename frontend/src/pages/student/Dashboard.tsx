@@ -40,55 +40,73 @@ interface LearningStreak {
   longestStreak: number;
 }
 
-// 3. API fetch functions with TypeScript return types - Updated with localhost:5000
-const fetchRecommendedMaterials = async (): Promise<Material[]> => {
+// 3. API fetch functions with Authorization token
+const fetchRecommendedMaterials = async (token: string): Promise<Material[]> => {
   const response = await axios.get('http://localhost:5000/api/material/materials', {
-    params: { limit: 4, sort: 'recommended' }
+    params: { limit: 4, sort: 'recommended' },
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
   });
   return response.data.data;
 };
 
-const fetchUpcomingQuizzes = async (): Promise<Quiz[]> => {
-  const response = await axios.get('http://localhost:5000/api/quiz/upcoming');
+const fetchUpcomingQuizzes = async (token: string): Promise<Quiz[]> => {
+  const response = await axios.get('http://localhost:5000/api/quiz/upcoming', {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
   return response.data.data;
 };
 
-const fetchUserProgress = async (userId: string): Promise<UserProgress> => {
-  const response = await axios.get(`http://localhost:5000/api/progress/update`);
+const fetchUserProgress = async (userId: string, token: string): Promise<UserProgress> => {
+  const response = await axios.get(`http://localhost:5000/api/progress/update`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
   return response.data.data;
 };
 
-const fetchLearningStreak = async (userId: string): Promise<LearningStreak> => {
-  const response = await axios.get(`http://localhost:5000/api/streak/${userId}`);
+const fetchLearningStreak = async (userId: string, token: string): Promise<LearningStreak> => {
+  const response = await axios.get(`http://localhost:5000/api/streak/${userId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
   return response.data.data;
 };
 
-// 4. Main Dashboard Component - No changes needed here
+// 4. Main Dashboard Component
 const StudentDashboard = () => {
   const { user } = useAuth();
+  const token = user?.token;
   const navigate = useNavigate();
-  
-  // 5. Data fetching with React Query
+
+  // 5. Data fetching with React Query and token checks
   const { data: recommendedMaterials, isLoading: materialsLoading } = useQuery({
     queryKey: ['recommendedMaterials'],
-    queryFn: fetchRecommendedMaterials
+    queryFn: () => token ? fetchRecommendedMaterials(token) : Promise.resolve([]),
+    enabled: !!token
   });
-  
+
   const { data: upcomingQuizzes, isLoading: quizzesLoading } = useQuery({
     queryKey: ['upcomingQuizzes'],
-    queryFn: fetchUpcomingQuizzes
+    queryFn: () => token ? fetchUpcomingQuizzes(token) : Promise.resolve([]),
+    enabled: !!token
   });
-  
+
   const { data: userProgress, isLoading: progressLoading } = useQuery({
     queryKey: ['userProgress', user?.id],
-    queryFn: () => user?.id ? fetchUserProgress(user.id) : null,
-    enabled: !!user?.id
+    queryFn: () => (user?.id && token) ? fetchUserProgress(user.id, token) : Promise.resolve(null),
+    enabled: !!user?.id && !!token
   });
-  
+
   const { data: learningStreak, isLoading: streakLoading } = useQuery({
     queryKey: ['learningStreak', user?.id],
-    queryFn: () => user?.id ? fetchLearningStreak(user.id) : null,
-    enabled: !!user?.id
+    queryFn: () => (user?.id && token) ? fetchLearningStreak(user.id, token) : Promise.resolve(null),
+    enabled: !!user?.id && !!token
   });
 
   // 6. Helper function to format dates
@@ -102,12 +120,12 @@ const StudentDashboard = () => {
     });
   };
 
-  // 7. Loading state
+  // 7. Loading state if user not loaded yet
   if (!user) {
     return <div>Loading user data...</div>;
   }
 
-  // 8. Main render - No changes needed here
+  // 8. Main render
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Welcome Section */}
@@ -120,7 +138,7 @@ const StudentDashboard = () => {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Progress Overview Card */}
+        {/* Progress Overview */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Progress Overview</CardTitle>
@@ -145,7 +163,6 @@ const StudentDashboard = () => {
                   </div>
                   <Progress value={userProgress?.weeklyGoal || 0} className="h-2" />
                 </div>
-                {/* Repeat for other progress bars */}
               </div>
             )}
             <Button variant="outline" className="w-full mt-4" size="sm">
@@ -155,7 +172,7 @@ const StudentDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Upcoming Quizzes Card */}
+        {/* Upcoming Quizzes */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Upcoming Quizzes</CardTitle>
@@ -173,16 +190,10 @@ const StudentDashboard = () => {
                 {upcomingQuizzes?.map((quiz) => (
                   <div key={quiz.id} className="border rounded-lg p-3 flex flex-col gap-1">
                     <div className="font-medium">{quiz.title}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {formatDate(quiz.date)}
-                    </div>
+                    <div className="text-xs text-muted-foreground">{formatDate(quiz.date)}</div>
                     <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="outline" className="text-[10px]">
-                        {quiz.duration}
-                      </Badge>
-                      <Badge variant="outline" className="text-[10px]">
-                        {quiz.questions} Questions
-                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">{quiz.duration}</Badge>
+                      <Badge variant="outline" className="text-[10px]">{quiz.questions} Questions</Badge>
                     </div>
                   </div>
                 ))}
@@ -206,7 +217,7 @@ const StudentDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Learning Streak Card */}
+        {/* Learning Streak */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Learning Streak</CardTitle>
@@ -227,7 +238,7 @@ const StudentDashboard = () => {
                 <div className="text-muted-foreground text-sm mt-1">
                   Days in a row
                 </div>
-                
+
                 <div className="grid grid-cols-7 gap-1 mt-4 w-full">
                   {[...Array(7)].map((_, i) => (
                     <div 
@@ -242,7 +253,7 @@ const StudentDashboard = () => {
                     </div>
                   ))}
                 </div>
-                
+
                 <Button variant="outline" className="w-full mt-4" size="sm">
                   <AreaChart className="h-4 w-4 mr-2" />
                   View Activity History
@@ -253,7 +264,7 @@ const StudentDashboard = () => {
         </Card>
       </div>
 
-      {/* Recommended Materials Section */}
+      {/* Recommended Materials */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Recommended Materials</h2>
@@ -261,7 +272,7 @@ const StudentDashboard = () => {
             View All
           </Button>
         </div>
-        
+
         {materialsLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => (
@@ -302,7 +313,7 @@ const StudentDashboard = () => {
                 <CardContent className="py-3">
                   <h3 className="font-medium truncate">{material.title}</h3>
                   <p className="text-xs text-muted-foreground">{material.topic}</p>
-                  
+
                   {(material.progress && material.progress > 0) && (
                     <div className="mt-2">
                       <div className="flex justify-between text-xs mb-1">

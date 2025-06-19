@@ -58,13 +58,12 @@ const App = () => (
             </Route>
 
             {/* Teacher-specific routes */}
-            <Route path="/upload" element={<AppLayout requiredRole="teacher" />}>
-              <Route index element={<MaterialUpload />} />
-            </Route>
-
-            <Route path="/students" element={<AppLayout requiredRole="teacher" />}>
-              <Route index element={<Students />} />
-            </Route>
+            {/* Teacher-specific routes - add this section */}
+<Route path="/teacher" element={<AppLayout requiredRole="teacher" />}>
+  <Route path="dashboard" element={<TeacherDashboard />} />
+  <Route path="upload" element={<MaterialUpload />} />
+  <Route path="students" element={<Students />} />
+</Route>
 
             {/* Admin-specific routes */}
             <Route path="/admin" element={<AppLayout requiredRole="admin" />}>

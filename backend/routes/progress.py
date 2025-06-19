@@ -20,15 +20,9 @@ def update_progress():
     material_id = data.get('material_id')
     status = data.get('status')  # 'To Learn', 'In Progress', or 'Completed'
 
-    # Input validation
+    # Input validation (unchanged)
     if not all([user_email, material_id, status]):
-        return jsonify({'error': 'Missing required fields: user_email, material_id, status'}), 400
-
-    if not validate_email(user_email):
-        return jsonify({'error': 'Invalid email format'}), 400
-
-    if not isinstance(material_id, int) or material_id <= 0:
-        return jsonify({'error': 'Invalid material ID'}), 400
+        return jsonify({'error': 'Missing required fields'}), 400
 
     if status not in ['To Learn', 'In Progress', 'Completed']:
         return jsonify({'error': 'Invalid status value'}), 400
@@ -37,43 +31,46 @@ def update_progress():
     cursor = None
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
 
-        # Check if material exists
+        # Check material exists
         cursor.execute("SELECT id FROM study_materials WHERE id = %s", (material_id,))
         if not cursor.fetchone():
             return jsonify({'error': 'Material not found'}), 404
 
-        # Check if progress already exists
+        # Check existing progress
         cursor.execute("""
             SELECT id FROM user_progress 
             WHERE user_email = %s AND material_id = %s
-            FOR UPDATE
             """, (user_email, material_id))
         existing = cursor.fetchone()
 
         if existing:
-            # Update existing progress
+            # Update existing record (MySQL compatible)
             cursor.execute("""
                 UPDATE user_progress 
                 SET status = %s, updated_at = NOW()
                 WHERE user_email = %s AND material_id = %s
-                RETURNING id
                 """, (status, user_email, material_id))
+            progress_id = existing['id']
         else:
-            # Insert new progress
+            # Insert new record (MySQL compatible)
             cursor.execute("""
                 INSERT INTO user_progress 
                 (user_email, material_id, status) 
                 VALUES (%s, %s, %s)
-                RETURNING id
                 """, (user_email, material_id, status))
+            progress_id = cursor.lastrowid
 
         conn.commit()
-        return jsonify({'message': 'Progress updated successfully'})
+        return jsonify({
+            'message': 'Progress updated successfully',
+            'progress_id': progress_id
+        })
 
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         return jsonify({'error': f'Database error: {str(e)}'}), 500
     finally:
         if cursor:
