@@ -22,3 +22,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+# Python
+routes/__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# VS Code
+.vscode/
+
+# File uploads
+uploads/
+*.pdf
