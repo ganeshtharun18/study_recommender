@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from database.db import get_db_connection
 from utils.tokens_utils import role_required
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 bp = Blueprint('progress', __name__, url_prefix='/api/progress')
@@ -264,6 +264,137 @@ def get_progress_stats(user_email):
             stats['completion_percentage'] = 0
 
         return jsonify(stats)
+
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+# New endpoint for subject progress (teacher view)
+@bp.route('/subject-progress', methods=['GET'])
+@role_required(['teacher'])
+def get_subject_progress():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT 
+                s.id AS subject_id,
+                s.name AS subject_name,
+                COUNT(DISTINCT sm.id) AS total_materials,
+                COUNT(DISTINCT up.material_id) AS accessed_materials,
+                COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN up.material_id END) AS completed_materials,
+                COUNT(DISTINCT up.user_email) AS active_students,
+                ROUND(
+                    COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN up.material_id END) / 
+                    GREATEST(COUNT(DISTINCT sm.id), 1) * 100
+                ) AS completion_percentage
+            FROM subjects s
+            LEFT JOIN study_materials sm ON s.id = sm.subject_id
+            LEFT JOIN user_progress up ON sm.id = up.material_id
+            GROUP BY s.id, s.name
+            ORDER BY completion_percentage DESC
+            """)
+
+        subject_progress = cursor.fetchall()
+        
+        # Convert numeric values to appropriate types
+        for subject in subject_progress:
+            subject['total_materials'] = int(subject.get('total_materials', 0))
+            subject['accessed_materials'] = int(subject.get('accessed_materials', 0))
+            subject['completed_materials'] = int(subject.get('completed_materials', 0))
+            subject['active_students'] = int(subject.get('active_students', 0))
+            subject['completion_percentage'] = float(subject.get('completion_percentage', 0))
+
+        return jsonify(subject_progress)
+
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+# New endpoint for recent activities (teacher view)
+@bp.route('/recent-activities', methods=['GET'])
+@role_required(['teacher'])
+def get_recent_activities():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Get recent progress updates (last 7 days)
+        cursor.execute("""
+            SELECT 
+                up.user_email,
+                up.material_id,
+                up.status,
+                up.updated_at,
+                sm.title AS material_title,
+                s.name AS subject_name,
+                users.name AS student_name
+            FROM user_progress up
+            JOIN study_materials sm ON up.material_id = sm.id
+            JOIN subjects s ON sm.subject_id = s.id
+            JOIN users u ON up.user_email = u.email
+            WHERE up.updated_at >= %s
+            ORDER BY up.updated_at DESC
+            LIMIT 10
+            """, (datetime.now() - timedelta(days=7),))
+
+        progress_updates = cursor.fetchall()
+
+        # Get new student registrations (last 7 days)
+        cursor.execute("""
+            SELECT 
+                email AS user_email,
+                users.name AS student_name,
+                created_at AS updated_at
+            FROM users
+            WHERE role = 'student' AND created_at >= %s
+            ORDER BY created_at DESC
+            LIMIT 5
+            """, (datetime.now() - timedelta(days=7),))
+
+        new_students = cursor.fetchall()
+
+        # Combine and format the activities
+        activities = []
+        
+        for update in progress_updates:
+            activities.append({
+                'id': f"progress_{update['material_id']}_{update['user_email']}",
+                'type': 'progress_update',
+                'content': f"{update['student_name']} marked '{update['material_title']}' as {update['status']}",
+                'time': update['updated_at'].isoformat() if isinstance(update['updated_at'], datetime) else update['updated_at'],
+                'student_name': update['student_name'],
+                'material_title': update['material_title'],
+                'subject_name': update['subject_name']
+            })
+        
+        for student in new_students:
+            activities.append({
+                'id': f"student_{student['user_email']}",
+                'type': 'new_student',
+                'content': f"New student registered: {student['student_name']}",
+                'time': student['updated_at'].isoformat() if isinstance(student['updated_at'], datetime) else student['updated_at'],
+                'student_name': student['student_name']
+            })
+
+        # Sort all activities by time (newest first)
+        activities.sort(key=lambda x: x['time'], reverse=True)
+        
+        # Return only the most recent 10 activities
+        return jsonify(activities[:10])
 
     except Exception as e:
         return jsonify({'error': f'Database error: {str(e)}'}), 500

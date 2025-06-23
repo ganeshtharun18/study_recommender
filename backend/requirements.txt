@@ -1,0 +1,6 @@
+Flask==2.3.2
+flask-cors==3.0.10
+mysql-connector-python==8.3.0
+python-dotenv==1.0.1
+requests==2.31.0  # Required for Hugging Face API calls
+transformers==4.40.0  # Optional for local inference

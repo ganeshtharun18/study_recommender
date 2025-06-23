@@ -160,7 +160,6 @@ def login():
         user = cursor.fetchone()
 
         if not user or not check_password_hash(user['hashed_password'], password):
-            # Don't reveal which one was wrong
             return jsonify({"error": "Invalid credentials"}), 401
 
         # Create tokens
@@ -216,7 +215,6 @@ def refresh():
         refresh_token = data['refreshToken']
         
         try:
-            # Verify the token properly
             payload = jwt.decode(
                 refresh_token,
                 current_app.config['SECRET_KEY'],
@@ -230,14 +228,13 @@ def refresh():
         if payload.get('type') != 'refresh':
             return jsonify({"error": "Invalid token type"}), 401
 
-        # Check if token exists in database
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
             SELECT * FROM refresh_tokens 
             WHERE token_jti = %s AND user_id = %s AND expires_at > UTC_TIMESTAMP()
-            FOR UPDATE  # Lock the row for update
+            FOR UPDATE
         """, (payload['jti'], payload['user_id']))
         
         token_record = cursor.fetchone()
@@ -245,14 +242,12 @@ def refresh():
         if not token_record:
             return jsonify({"error": "Invalid or expired refresh token"}), 401
         
-        # Get user data
         cursor.execute("SELECT * FROM users WHERE id = %s", (payload['user_id'],))
         user = cursor.fetchone()
         
         if not user:
             return jsonify({"error": "User not found"}), 404
         
-        # Create new access token
         new_access_token, _, access_jti, _ = create_tokens(
             user['id'],
             user['email'],
@@ -289,12 +284,11 @@ def logout():
         refresh_token = data['refreshToken']
         
         try:
-            # Verify the token to get the payload
             payload = jwt.decode(
                 refresh_token,
                 current_app.config['SECRET_KEY'],
                 algorithms=["HS256"],
-                options={"verify_exp": False}  # Allow expired tokens for logout
+                options={"verify_exp": False}
             )
         except jwt.InvalidTokenError:
             return jsonify({"error": "Invalid token"}), 401
@@ -302,7 +296,6 @@ def logout():
         if payload.get('type') != 'refresh':
             return jsonify({"error": "Invalid token type"}), 400
 
-        # Delete the refresh token from database
         conn = get_connection()
         cursor = conn.cursor()
         
@@ -311,15 +304,102 @@ def logout():
             WHERE token_jti = %s AND user_id = %s
         """, (payload['jti'], payload['user_id']))
         
-        # Also invalidate all access tokens for this user in a real implementation
-        # This would require maintaining a token blacklist or using short-lived tokens
-        
         conn.commit()
         
         return jsonify({"message": "Logged out successfully"})
 
     except Exception as e:
         current_app.logger.error(f"Logout error: {str(e)}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@bp.route('/students', methods=['GET'])
+def get_students():
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Authorization header missing or invalid"}), 401
+
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(
+                token,
+                current_app.config['SECRET_KEY'],
+                algorithms=["HS256"]
+            )
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Access token expired"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid access token"}), 401
+
+        if payload.get('role') not in ['admin', 'teacher']:
+            return jsonify({"error": "Unauthorized access"}), 403
+
+        page = request.args.get('page', default=1, type=int)
+        per_page = request.args.get('per_page', default=10, type=int)
+        search = request.args.get('search', default=None, type=str)
+        exclude_test = request.args.get('exclude_test', default=False, type=lambda v: v.lower() == 'true')
+        sort = request.args.get('sort', default='id')
+
+        offset = (page - 1) * per_page
+
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        query = """
+            SELECT id, name, email, created_at 
+            FROM users 
+            WHERE role = 'student'
+        """
+        params = []
+
+        if search:
+            query += " AND (name LIKE %s OR email LIKE %s)"
+            params.extend([f"%{search}%", f"%{search}%"])
+
+        if exclude_test:
+            query += " AND name NOT LIKE %s AND email NOT LIKE %s"
+            params.extend(["%Test%", "%test%"])
+
+        sort_options = {
+            'name': 'name ASC',
+            'newest': 'created_at DESC',
+            'oldest': 'created_at ASC',
+            'id': 'id ASC'
+        }
+        query += f" ORDER BY {sort_options.get(sort, 'id ASC')}"
+
+        query += " LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+
+        cursor.execute(query, params)
+        students = cursor.fetchall()
+
+        count_query = "SELECT COUNT(*) as total FROM users WHERE role = 'student'"
+        if search:
+            count_query += " AND (name LIKE %s OR email LIKE %s)"
+        if exclude_test:
+            count_query += " AND name NOT LIKE %s AND email NOT LIKE %s"
+
+        cursor.execute(count_query, params[:-2])
+        total = cursor.fetchone()['total']
+
+        return jsonify({
+            "students": students,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": (total + per_page - 1) // per_page
+            }
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching students: {str(e)}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
     finally:
         if 'cursor' in locals():
