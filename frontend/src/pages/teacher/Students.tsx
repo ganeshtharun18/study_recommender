@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, User, Mail, Clock, BarChart, FileText, BookOpen } from "lucide-react";
+import { Search, User, Mail, Clock, FileText, BookOpen } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import api from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -47,36 +47,23 @@ const Students = () => {
   const [page, setPage] = useState(1);
   const perPage = 10;
 
-  // Fetch students data
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: ['students', page, perPage, searchQuery],
-    queryFn: async () => {
-      const response = await api.get('http://localhost:5000/api/auth/students', {
-        params: {
-          page,
-          per_page: perPage,
-          search: searchQuery || undefined
-        }
-      });
-      return response.data;
-    },
-    keepPreviousData: true
+    queryKey: ["students", page, perPage, searchQuery],
+    queryFn: () => api.getStudents(page, perPage, searchQuery),
+    //keepPreviousData: true,
   });
 
-  // Fetch statistics data
   const { data: statsData, isLoading: statsLoading } = useQuery({
-    queryKey: ['studentStats'],
-    queryFn: async () => {
-      const response = await api.get('/students/stats');
-      return response.data;
-    }
+    queryKey: ["studentStats", user?.email],
+    enabled: !!user?.email,
+    queryFn: () => api.getProgressStats(user.email),
   });
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
+    return new Date(dateString).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
   };
 
@@ -127,9 +114,7 @@ const Students = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">My Students</h1>
-          <p className="text-muted-foreground">
-            Manage and track student progress
-          </p>
+          <p className="text-muted-foreground">Manage and track student progress</p>
         </div>
 
         <div className="relative">
@@ -146,9 +131,7 @@ const Students = () => {
       <Card>
         <CardHeader>
           <CardTitle>Student Overview</CardTitle>
-          <CardDescription>
-            View and manage students enrolled in your courses
-          </CardDescription>
+          <CardDescription>View and manage students enrolled in your courses</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -180,8 +163,8 @@ const Students = () => {
                     <div className="flex items-center gap-2">
                       <div className="w-full max-w-24">
                         <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-edu-primary rounded-full" 
+                          <div
+                            className="h-full bg-edu-primary rounded-full"
                             style={{ width: `${student.progress || 0}%` }}
                           />
                         </div>
@@ -205,7 +188,7 @@ const Students = () => {
                     <div className="flex items-center gap-1">
                       <Clock className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm">
-                        {student.last_active ? formatDate(student.last_active) : 'Never'}
+                        {student.last_active ? formatDate(student.last_active) : "Never"}
                       </span>
                     </div>
                   </TableCell>
@@ -233,7 +216,7 @@ const Students = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setPage(p => Math.max(p - 1, 1))}
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
                 disabled={page === 1}
               >
                 Previous
@@ -241,7 +224,7 @@ const Students = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setPage(p => p + 1)}
+                onClick={() => setPage((p) => p + 1)}
                 disabled={page >= studentsData.pagination.total_pages}
               >
                 Next
@@ -261,18 +244,18 @@ const Students = () => {
             <div className="flex items-center justify-center">
               <div className="relative h-32 w-32">
                 <svg className="h-full w-full" viewBox="0 0 36 36">
-                  <circle cx="18" cy="18" r="16" fill="none" stroke="#f3f4f6" strokeWidth="2"></circle>
-                  <circle 
-                    cx="18" 
-                    cy="18" 
-                    r="16" 
-                    fill="none" 
-                    stroke="hsl(var(--edu-primary))" 
-                    strokeWidth="2" 
-                    strokeDasharray={`${(statsData?.average_progress || 0) * 100 / 100} 100`} 
+                  <circle cx="18" cy="18" r="16" fill="none" stroke="#f3f4f6" strokeWidth="2" />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="16"
+                    fill="none"
+                    stroke="hsl(var(--edu-primary))"
+                    strokeWidth="2"
+                    strokeDasharray={`${statsData?.average_progress || 0} 100`}
                     strokeDashoffset="25"
                     transform="rotate(-90 18 18)"
-                  ></circle>
+                  />
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
                   <span className="text-3xl font-bold">{statsData?.average_progress || 0}%</span>
@@ -289,42 +272,26 @@ const Students = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div>
-                <div className="flex justify-between mb-1 text-sm">
-                  <span>Completed</span>
-                  <span>{statsData?.material_completion?.completed || 0}%</span>
+              {(["completed", "in_progress", "not_started"] as const).map((key) => (
+                <div key={key}>
+                  <div className="flex justify-between mb-1 text-sm">
+                    <span>{key.replace("_", " ").replace(/\b\w/g, l => l.toUpperCase())}</span>
+                    <span>{statsData?.material_completion?.[key] || 0}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${
+                        key === "completed"
+                          ? "bg-edu-secondary"
+                          : key === "in_progress"
+                          ? "bg-amber-500"
+                          : "bg-red-500"
+                      }`}
+                      style={{ width: `${statsData?.material_completion?.[key] || 0}%` }}
+                    ></div>
+                  </div>
                 </div>
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-edu-secondary rounded-full" 
-                    style={{ width: `${statsData?.material_completion?.completed || 0}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between mb-1 text-sm">
-                  <span>In Progress</span>
-                  <span>{statsData?.material_completion?.in_progress || 0}%</span>
-                </div>
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-amber-500 rounded-full" 
-                    style={{ width: `${statsData?.material_completion?.in_progress || 0}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between mb-1 text-sm">
-                  <span>Not Started</span>
-                  <span>{statsData?.material_completion?.not_started || 0}%</span>
-                </div>
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-red-500 rounded-full" 
-                    style={{ width: `${statsData?.material_completion?.not_started || 0}%` }}
-                  ></div>
-                </div>
-              </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -339,10 +306,15 @@ const Students = () => {
               {statsData?.quiz_performance?.map((quiz, index) => (
                 <div key={index} className="flex justify-between items-center">
                   <span className="text-sm">{quiz.subject}</span>
-                  <Badge className={
-                    quiz.score >= 80 ? 'bg-green-500' : 
-                    quiz.score >= 60 ? 'bg-amber-500' : 'bg-red-500'
-                  }>
+                  <Badge
+                    className={
+                      quiz.score >= 80
+                        ? "bg-green-500"
+                        : quiz.score >= 60
+                        ? "bg-amber-500"
+                        : "bg-red-500"
+                    }
+                  >
                     {quiz.score}%
                   </Badge>
                 </div>
@@ -355,4 +327,4 @@ const Students = () => {
   );
 };
 
-export default Students;
+export default Students; 

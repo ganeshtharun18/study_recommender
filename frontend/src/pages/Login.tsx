@@ -1,38 +1,42 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth, UserRole } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardFooter, 
-  CardHeader, 
-  CardTitle 
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import { BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import {
   RadioGroup,
-  RadioGroupItem
+  RadioGroupItem,
 } from "@/components/ui/radio-group";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("student");
+  const { login, isAuthenticated, loading: authLoading } = useAuth();
+
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+    role: "student" as UserRole, // Still preserved for display
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Redirect if already authenticated
-  if (isAuthenticated) {
-    navigate("/dashboard");
-  }
+  useEffect(() => {
+    if (isAuthenticated && !authLoading) {
+      navigate("/dashboard");
+    }
+  }, [isAuthenticated, authLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,20 +44,30 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const success = await login(email, password);
-      if (success) {
-        toast.success("Login successful!");
-        navigate("/dashboard");
-      } else {
-        setError("Invalid credentials. Please try again.");
-        toast.error("Login failed. Please check your credentials.");
-      }
+      await login(formData.email, formData.password);
+      toast.success("Login successful!");
+      navigate("/dashboard");
     } catch (err) {
-      setError("An error occurred. Please try again.");
-      toast.error("Login error. Please try again.");
+      setError("Invalid credentials. Please try again.");
+      toast.error("Login failed. Please check your credentials.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleRoleChange = (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      role: value as UserRole,
+    }));
   };
 
   return (
@@ -80,10 +94,11 @@ const Login = () => {
                   <Label htmlFor="email">Email</Label>
                   <Input
                     id="email"
+                    name="email"
                     type="email"
                     placeholder="Enter your email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={formData.email}
+                    onChange={handleChange}
                     required
                   />
                 </div>
@@ -92,10 +107,11 @@ const Login = () => {
                   <Label htmlFor="password">Password</Label>
                   <Input
                     id="password"
+                    name="password"
                     type="password"
                     placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    value={formData.password}
+                    onChange={handleChange}
                     required
                   />
                 </div>
@@ -103,8 +119,8 @@ const Login = () => {
                 <div>
                   <Label>I am a:</Label>
                   <RadioGroup
-                    value={role}
-                    onValueChange={(val) => setRole(val as UserRole)}
+                    value={formData.role}
+                    onValueChange={handleRoleChange}
                     className="flex gap-4 pt-2"
                   >
                     <div className="flex items-center space-x-2">
@@ -127,13 +143,14 @@ const Login = () => {
                 <Button
                   type="submit"
                   className="w-full bg-edu-primary hover:bg-edu-primary/90"
-                  disabled={isLoading}
+                  disabled={isLoading || authLoading}
                 >
                   {isLoading ? "Signing in..." : "Sign In"}
                 </Button>
               </div>
             </form>
           </CardContent>
+
           <CardFooter className="flex flex-col gap-4">
             <div className="text-sm text-muted-foreground text-center">
               <span>Demo accounts:</span>
