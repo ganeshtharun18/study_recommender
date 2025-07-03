@@ -1,12 +1,15 @@
-const API_BASE = "http://127.0.0.1:5000"; // Or import.meta.env.VITE_API_BASE
+const API_BASE = "http://127.0.0.1:5000"; // Or use import.meta.env.VITE_API_BASE
 
-// Helper function to handle auth headers
+// Get Authorization header
 const getAuthHeaders = () => {
-  const token = localStorage.getItem("eduToken");
+  const token = localStorage.getItem("accessToken");
+  if (!token) {
+    console.warn("No access token found in localStorage.");
+  }
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-// Helper function to handle common fetch logic
+// Core fetch wrapper
 const apiFetch = async (url: string, options: RequestInit = {}) => {
   const response = await fetch(url, {
     ...options,
@@ -15,6 +18,7 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
       ...getAuthHeaders(),
       ...options.headers,
     },
+    credentials: "include", // ensures cookies (if any) are sent
   });
 
   if (!response.ok) {
@@ -25,6 +29,29 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
   }
 
   return response.json();
+};
+
+// --- Auth ---
+export const login = async (email: string, password: string) => {
+  const response = await apiFetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  if (response.accessToken) {
+    localStorage.setItem("eduToken", response.accessToken);
+  }
+  return response;
+};
+
+export const refreshToken = async (refreshToken: string) => {
+  const response = await apiFetch(`${API_BASE}/api/auth/refresh`, {
+    method: "POST",
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (response.accessToken) {
+    localStorage.setItem("eduToken", response.accessToken);
+  }
+  return response;
 };
 
 // --- Study Materials ---
@@ -67,9 +94,24 @@ export const getRecentMaterials = async (userEmail: string) => {
 };
 
 export const getProgressStats = async (userEmail: string) => {
-  return apiFetch(
-    `${API_BASE}/api/progress/stats/${encodeURIComponent(userEmail)}`
-  );
+  const encodedEmail = encodeURIComponent(userEmail);
+  return apiFetch(`${API_BASE}/api/progress/stats/${encodedEmail}`);
+};
+
+// --- Students (for teacher/admin) ---
+export const getStudents = async (
+  page: number,
+  perPage: number,
+  searchQuery: string
+) => {
+  const params = new URLSearchParams();
+  params.append("page", String(page));
+  params.append("per_page", String(perPage));
+  if (searchQuery) {
+    params.append("search", searchQuery);
+  }
+
+  return apiFetch(`${API_BASE}/api/auth/students?${params.toString()}`);
 };
 
 // --- Quiz ---
@@ -106,7 +148,7 @@ export async function searchYouTube(topic: string) {
   );
 }
 
-// Default export object
+// --- Export all ---
 export default {
   fetchStudyMaterials,
   updateProgress,
@@ -114,8 +156,11 @@ export default {
   getProgressSummary,
   getRecentMaterials,
   getProgressStats,
+  getStudents,
   fetchQuizQuestions,
   submitQuiz,
   fetchRecommendations,
   searchYouTube,
+  login,
+  refreshToken,
 };
