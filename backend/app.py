@@ -142,7 +142,7 @@ def generate_content():
         }), 500
 
 # Import and register all blueprints
-from routes.auth import bp as auth_bp
+from routes.auth import bp as auth_bp,limiter
 from routes.material import bp as material_bp
 from routes.recommend import bp as recommend_bp
 from routes.progress import bp as progress_bp
@@ -151,6 +151,7 @@ from routes.youtube import bp as youtube_bp
 from routes.streak import bp as streak_bp
 
 app.register_blueprint(auth_bp)
+limiter.init_app(app)
 app.register_blueprint(material_bp)
 app.register_blueprint(recommend_bp)
 app.register_blueprint(progress_bp)

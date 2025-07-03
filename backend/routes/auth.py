@@ -5,8 +5,17 @@ import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 from functools import wraps
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 bp = Blueprint('auth', __name__, url_prefix='/api/auth')
+
+# Initialize rate limiter
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
 
 # Token expiration times (in seconds)
 ACCESS_TOKEN_EXPIRATION = 3600  # 1 hour
@@ -18,9 +27,10 @@ def get_connection():
         user=current_app.config['DB_USER'],
         password=current_app.config['DB_PASSWORD'],
         database=current_app.config['DB_NAME'],
-        pool_size=5,
+        pool_size=10,
         pool_name="auth_pool",
-        pool_reset_session=True
+        pool_reset_session=True,
+        autocommit=True
     )
 
 def create_tokens(user_id, email, role, name):
@@ -33,7 +43,7 @@ def create_tokens(user_id, email, role, name):
         'exp': datetime.datetime.utcnow() + datetime.timedelta(seconds=ACCESS_TOKEN_EXPIRATION),
         'iat': datetime.datetime.utcnow(),
         'type': 'access',
-        'jti': str(uuid.uuid4())  # Unique identifier for access token
+        'jti': str(uuid.uuid4())
     }
     
     refresh_payload = {
@@ -41,7 +51,9 @@ def create_tokens(user_id, email, role, name):
         'exp': datetime.datetime.utcnow() + datetime.timedelta(seconds=REFRESH_TOKEN_EXPIRATION),
         'iat': datetime.datetime.utcnow(),
         'type': 'refresh',
-        'jti': str(uuid.uuid4())  # Unique identifier for refresh token
+        'jti': str(uuid.uuid4()),
+        'user_agent': request.headers.get('User-Agent', '')[:200],
+        'ip': request.remote_addr
     }
     
     access_token = jwt.encode(
@@ -68,6 +80,22 @@ def validate_input(data, required_fields):
         return False, f"Missing fields: {', '.join(missing_fields)}"
     
     return True, ""
+
+def cleanup_expired_tokens():
+    """Periodic cleanup of expired refresh tokens"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM refresh_tokens WHERE expires_at < UTC_TIMESTAMP()")
+        conn.commit()
+        current_app.logger.info("Cleaned up expired refresh tokens")
+    except Exception as e:
+        current_app.logger.error(f"Token cleanup error: {str(e)}")
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 
 @bp.route('/register', methods=['POST'])
 def register():
@@ -108,12 +136,14 @@ def register():
         
         # Store refresh token in database
         cursor.execute("""
-            INSERT INTO refresh_tokens (user_id, token_jti, expires_at)
-            VALUES (%s, %s, %s)
+            INSERT INTO refresh_tokens (user_id, token_jti, expires_at, user_agent, ip_address)
+            VALUES (%s, %s, %s, %s, %s)
         """, (
             user_id,
             refresh_jti,
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=REFRESH_TOKEN_EXPIRATION)
+            datetime.datetime.utcnow() + datetime.timedelta(seconds=REFRESH_TOKEN_EXPIRATION),
+            request.headers.get('User-Agent', '')[:200],
+            request.remote_addr
         ))
         
         conn.commit()
@@ -142,9 +172,25 @@ def register():
         if 'conn' in locals():
             conn.close()
 
+
+#checking if already hashed
+def is_already_hashed(pwd: str) -> bool:
+    return pwd.startswith("scrypt:") or pwd.startswith("pbkdf2:")
+#confirmation code
+
 @bp.route('/login', methods=['POST'])
 def login():
     try:
+        # Check for existing authorization and force logout if present
+        if 'Authorization' in request.headers:
+            try:
+                token = request.headers['Authorization'].split(' ')[1]
+                jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+                # Force logout existing session
+                logout()
+            except:
+                pass  # Ignore invalid tokens
+
         data = request.get_json()
         valid, message = validate_input(data, ['email', 'password'])
         if not valid:
@@ -158,6 +204,7 @@ def login():
 
         cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
         user = cursor.fetchone()
+        print("Fetched user:", user)
 
         if not user or not check_password_hash(user['hashed_password'], password):
             return jsonify({"error": "Invalid credentials"}), 401
@@ -172,15 +219,19 @@ def login():
         
         # Store refresh token in database
         cursor.execute("""
-            INSERT INTO refresh_tokens (user_id, token_jti, expires_at)
-            VALUES (%s, %s, %s)
+            INSERT INTO refresh_tokens (user_id, token_jti, expires_at, user_agent, ip_address)
+            VALUES (%s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE 
                 token_jti = VALUES(token_jti),
-                expires_at = VALUES(expires_at)
+                expires_at = VALUES(expires_at),
+                user_agent = VALUES(user_agent),
+                ip_address = VALUES(ip_address)
         """, (
             user['id'],
             refresh_jti,
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=REFRESH_TOKEN_EXPIRATION)
+            datetime.datetime.utcnow() + datetime.timedelta(seconds=REFRESH_TOKEN_EXPIRATION),
+            request.headers.get('User-Agent', '')[:200],
+            request.remote_addr
         ))
         
         conn.commit()
@@ -205,7 +256,9 @@ def login():
         if 'conn' in locals():
             conn.close()
 
+
 @bp.route('/refresh', methods=['POST'])
+@limiter.limit("100 per minute")  # Strict rate limiting for refresh endpoint
 def refresh():
     try:
         data = request.get_json()
@@ -228,6 +281,7 @@ def refresh():
         if payload.get('type') != 'refresh':
             return jsonify({"error": "Invalid token type"}), 401
 
+        # Verify the token matches the stored one
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
         
@@ -241,6 +295,13 @@ def refresh():
         
         if not token_record:
             return jsonify({"error": "Invalid or expired refresh token"}), 401
+        
+        # Verify the requesting IP matches the token's original IP
+        if payload.get('ip') != request.remote_addr:
+            current_app.logger.warning(
+                f"IP mismatch for refresh token: original {payload.get('ip')}, current {request.remote_addr}"
+            )
+            return jsonify({"error": "Invalid refresh token"}), 401
         
         cursor.execute("SELECT * FROM users WHERE id = %s", (payload['user_id'],))
         user = cursor.fetchone()
@@ -273,38 +334,35 @@ def refresh():
             cursor.close()
         if 'conn' in locals():
             conn.close()
-
+            
 @bp.route('/logout', methods=['POST'])
 def logout():
     try:
         data = request.get_json()
-        if not data or 'refreshToken' not in data:
-            return jsonify({"error": "Refresh token required"}), 400
+        if not data:
+            return jsonify({"message": "Logged out successfully"})
 
-        refresh_token = data['refreshToken']
+        refresh_token = data.get('refreshToken')
         
-        try:
-            payload = jwt.decode(
-                refresh_token,
-                current_app.config['SECRET_KEY'],
-                algorithms=["HS256"],
-                options={"verify_exp": False}
-            )
-        except jwt.InvalidTokenError:
-            return jsonify({"error": "Invalid token"}), 401
-        
-        if payload.get('type') != 'refresh':
-            return jsonify({"error": "Invalid token type"}), 400
-
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            DELETE FROM refresh_tokens 
-            WHERE token_jti = %s AND user_id = %s
-        """, (payload['jti'], payload['user_id']))
-        
-        conn.commit()
+        if refresh_token:
+            try:
+                payload = jwt.decode(
+                    refresh_token,
+                    current_app.config['SECRET_KEY'],
+                    algorithms=["HS256"],
+                    options={"verify_exp": False}
+                )
+                
+                if payload.get('type') == 'refresh':
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        DELETE FROM refresh_tokens 
+                        WHERE token_jti = %s AND user_id = %s
+                    """, (payload['jti'], payload['user_id']))
+                    conn.commit()
+            except jwt.InvalidTokenError:
+                pass
         
         return jsonify({"message": "Logged out successfully"})
 
@@ -317,9 +375,12 @@ def logout():
         if 'conn' in locals():
             conn.close()
 
+# ... [rest of your existing routes remain unchanged]
+
 @bp.route('/students', methods=['GET'])
 def get_students():
     try:
+        # --- Authorization Header Check ---
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return jsonify({"error": "Authorization header missing or invalid"}), 401
@@ -339,6 +400,7 @@ def get_students():
         if payload.get('role') not in ['admin', 'teacher']:
             return jsonify({"error": "Unauthorized access"}), 403
 
+        # --- Query Parameters ---
         page = request.args.get('page', default=1, type=int)
         per_page = request.args.get('per_page', default=10, type=int)
         search = request.args.get('search', default=None, type=str)
@@ -350,21 +412,23 @@ def get_students():
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
 
+        # --- Build Main Query ---
         query = """
             SELECT id, name, email, created_at 
             FROM users 
             WHERE role = 'student'
         """
-        params = []
+        query_params = []
 
         if search:
             query += " AND (name LIKE %s OR email LIKE %s)"
-            params.extend([f"%{search}%", f"%{search}%"])
+            query_params.extend([f"%{search}%", f"%{search}%"])
 
         if exclude_test:
             query += " AND name NOT LIKE %s AND email NOT LIKE %s"
-            params.extend(["%Test%", "%test%"])
+            query_params.extend(["%Test%", "%test%"])
 
+        # Sorting
         sort_options = {
             'name': 'name ASC',
             'newest': 'created_at DESC',
@@ -373,19 +437,26 @@ def get_students():
         }
         query += f" ORDER BY {sort_options.get(sort, 'id ASC')}"
 
+        # Pagination
         query += " LIMIT %s OFFSET %s"
-        params.extend([per_page, offset])
+        query_params.extend([per_page, offset])
 
-        cursor.execute(query, params)
+        cursor.execute(query, query_params)
         students = cursor.fetchall()
 
+        # --- Count Query ---
         count_query = "SELECT COUNT(*) as total FROM users WHERE role = 'student'"
+        count_params = []
+
         if search:
             count_query += " AND (name LIKE %s OR email LIKE %s)"
+            count_params.extend([f"%{search}%", f"%{search}%"])
+
         if exclude_test:
             count_query += " AND name NOT LIKE %s AND email NOT LIKE %s"
+            count_params.extend(["%Test%", "%test%"])
 
-        cursor.execute(count_query, params[:-2])
+        cursor.execute(count_query, count_params)
         total = cursor.fetchone()['total']
 
         return jsonify({
@@ -401,8 +472,16 @@ def get_students():
     except Exception as e:
         current_app.logger.error(f"Error fetching students: {str(e)}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
+
     finally:
         if 'cursor' in locals():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+# Add this to your app initialization to cleanup tokens periodically
+# Example with APScheduler:
+# from apscheduler.schedulers.background import BackgroundScheduler
+# scheduler = BackgroundScheduler()
+# scheduler.add_job(cleanup_expired_tokens, 'interval', hours=1)
+# scheduler.start()

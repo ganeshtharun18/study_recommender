@@ -215,26 +215,37 @@ def get_recent_materials(user_email):
             conn.close()
 
 @bp.route('/stats/<string:user_email>', methods=['GET'])
-@role_required(['student'])
+@role_required(['student', 'teacher'])
 def get_progress_stats(user_email):
+    # Validate email format
     if not validate_email(user_email):
         return jsonify({'error': 'Invalid email format'}), 400
 
     conn = None
     cursor = None
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Get total materials count
+        # Get total number of study materials
         cursor.execute("SELECT COUNT(*) AS total FROM study_materials")
-        total_materials = cursor.fetchone()
-        if not total_materials:
-            return jsonify({'error': 'Could not retrieve total materials count'}), 500
-            
-        total_materials = total_materials['total'] or 0
+        result = cursor.fetchone()
+        total_materials = result['total'] if result else 0
 
-        # Get user's progress stats
+        # Default to zero if table is empty
+        if total_materials == 0:
+            return jsonify({
+                'total_materials': 0,
+                'total_accessed': 0,
+                'to_learn': 0,
+                'in_progress': 0,
+                'completed': 0,
+                'not_started': 0,
+                'completion_percentage': 0.0
+            }), 200
+
+        # Get user's progress grouped by status
         cursor.execute("""
             SELECT 
                 COUNT(*) AS total_accessed,
@@ -243,27 +254,27 @@ def get_progress_stats(user_email):
                 COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) AS completed
             FROM user_progress
             WHERE user_email = %s
-            """, (user_email,))
+        """, (user_email,))
+        
         stats = cursor.fetchone() or {}
 
-        # Calculate derived stats
-        stats['total_materials'] = int(total_materials)
-        stats['total_accessed'] = int(stats.get('total_accessed', 0))
-        stats['to_learn'] = int(stats.get('to_learn', 0))
-        stats['in_progress'] = int(stats.get('in_progress', 0))
-        stats['completed'] = int(stats.get('completed', 0))
-        stats['not_started'] = max(0, total_materials - stats['total_accessed'])
-        
-        # Calculate completion percentage safely
-        try:
-            stats['completion_percentage'] = round(
-                (stats['completed'] / total_materials * 100) if total_materials > 0 else 0, 
-                2
-            )
-        except:
-            stats['completion_percentage'] = 0
+        total_accessed = stats.get('total_accessed', 0)
+        to_learn = stats.get('to_learn', 0)
+        in_progress = stats.get('in_progress', 0)
+        completed = stats.get('completed', 0)
 
-        return jsonify(stats)
+        not_started = max(0, total_materials - total_accessed)
+        completion_percentage = round((completed / total_materials) * 100, 2) if total_materials > 0 else 0.0
+
+        return jsonify({
+            'total_materials': total_materials,
+            'total_accessed': total_accessed,
+            'to_learn': to_learn,
+            'in_progress': in_progress,
+            'completed': completed,
+            'not_started': not_started,
+            'completion_percentage': completion_percentage
+        })
 
     except Exception as e:
         return jsonify({'error': f'Database error: {str(e)}'}), 500
@@ -272,6 +283,7 @@ def get_progress_stats(user_email):
             cursor.close()
         if conn:
             conn.close()
+
 
 # New endpoint for subject progress (teacher view)
 @bp.route('/subject-progress', methods=['GET'])
@@ -403,3 +415,88 @@ def get_recent_activities():
             cursor.close()
         if conn:
             conn.close()
+
+
+
+@bp.route('/dashboard-stats', methods=['GET'])
+@role_required(['teacher'])
+def get_dashboard_stats():
+    """Get comprehensive dashboard statistics for teachers"""
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. Overall statistics
+        cursor.execute("""
+            SELECT 
+                COUNT(DISTINCT u.id) AS total_students,
+                COUNT(DISTINCT s.id) AS total_subjects,
+                COUNT(DISTINCT sm.id) AS total_materials,
+                AVG(
+                    (SELECT COUNT(*) FROM user_progress up 
+                     WHERE up.user_email = u.email AND up.status = 'Completed') / 
+                    GREATEST((SELECT COUNT(*) FROM study_materials), 1) * 100
+                ) AS avg_completion
+            FROM users u
+            CROSS JOIN subjects s
+            CROSS JOIN study_materials sm
+            WHERE u.role = 'student'
+        """)
+        overview = cursor.fetchone()
+
+        # 2. Subject-wise progress
+        cursor.execute("""
+            SELECT 
+                s.id, 
+                s.name,
+                COUNT(DISTINCT sm.id) AS total_materials,
+                COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN sm.id END) AS completed,
+                ROUND(
+                    COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN sm.id END) / 
+                    GREATEST(COUNT(DISTINCT sm.id), 1) * 100, 1
+                ) AS completion_rate
+            FROM subjects s
+            LEFT JOIN study_materials sm ON s.id = sm.subject_id
+            LEFT JOIN user_progress up ON sm.id = up.material_id
+            GROUP BY s.id
+            ORDER BY completion_rate DESC
+            LIMIT 5
+        """)
+        top_subjects = cursor.fetchall()
+
+        # 3. Student progress
+        cursor.execute("""
+            SELECT 
+                u.id,
+                u.name,
+                u.email,
+                COUNT(DISTINCT up.material_id) AS materials_accessed,
+                COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN up.material_id END) AS completed,
+                MAX(up.updated_at) AS last_activity
+            FROM users u
+            LEFT JOIN user_progress up ON u.email = up.user_email
+            WHERE u.role = 'student'
+            GROUP BY u.id
+            ORDER BY last_activity DESC
+            LIMIT 10
+        """)
+        recent_students = cursor.fetchall()
+
+        return jsonify({
+            'overview': {
+                'total_students': overview['total_students'],
+                'total_subjects': overview['total_subjects'],
+                'total_materials': overview['total_materials'],
+                'avg_completion': float(overview['avg_completion']) if overview['avg_completion'] else 0
+            },
+            'top_subjects': top_subjects,
+            'recent_students': recent_students
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
