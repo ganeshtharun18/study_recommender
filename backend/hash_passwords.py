@@ -1,26 +1,43 @@
 import mysql.connector
 from werkzeug.security import generate_password_hash
 
-# Connect to your MySQL database
+# ✅ Utility to detect already hashed passwords
+def is_already_hashed(pwd: str) -> bool:
+    return pwd.startswith("scrypt:") or pwd.startswith("pbkdf2:")
+
+# ✅ MySQL connection setup
 conn = mysql.connector.connect(
     host="localhost",
     user="root",
-    password="ganesh",  # <- Replace with your DB password
+    password="ganesh",  # 🔐 Change this to your DB password
     database="study_recommender"
 )
 cursor = conn.cursor(dictionary=True)
 
-# Fetch all users and their current (plaintext) passwords
-cursor.execute("SELECT id, hashed_password FROM users")
+# ✅ Fetch all users and their passwords
+cursor.execute("SELECT id, email, hashed_password FROM users")
 users = cursor.fetchall()
 
-# Hash and update passwords
+# ✅ Loop through users and hash only plaintext passwords
 for user in users:
-    hashed_password = generate_password_hash(user['hashed_password'])
-    cursor.execute("UPDATE users SET hashed_password = %s WHERE id = %s", (hashed_password, user['id']))
+    current_pwd = user['hashed_password']
+    email = user['email']
+    user_id = user['id']
 
+    if is_already_hashed(current_pwd):
+        print(f"⚠️ Skipping already hashed password for {email}")
+        continue
+
+    new_hashed = generate_password_hash(current_pwd)
+    cursor.execute(
+        "UPDATE users SET hashed_password = %s WHERE id = %s",
+        (new_hashed, user_id)
+    )
+    print(f"✅ Hashed password updated for {email}")
+
+# ✅ Commit and close DB connection
 conn.commit()
 cursor.close()
 conn.close()
 
-print("✅ All passwords hashed successfully.")
+print("\n🎉 All passwords hashed successfully (without duplicates).")
