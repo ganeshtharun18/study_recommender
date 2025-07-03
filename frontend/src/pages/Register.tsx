@@ -1,6 +1,5 @@
-
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,22 +24,45 @@ const Register = () => {
   const [role, setRole] = useState<UserRole>("student");
   const [isLoading, setIsLoading] = useState(false);
 
+  const navigate = useNavigate();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (password !== confirmPassword) {
       toast.error("Passwords do not match");
       return;
     }
-    
+
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      toast.success("Registration successful! Please log in.");
+    try {
+      const response = await fetch("http://localhost:5000/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          role,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Registration failed");
+      }
+
+      toast.success("Registration successful! Redirecting...");
+      setTimeout(() => navigate("/login"), 1500);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
       setIsLoading(false);
-      // In a real app, this would create a user and redirect to login
-    }, 1000);
+    }
   };
 
   return (
@@ -119,11 +141,15 @@ const Register = () => {
                   >
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="student" id="reg-student" />
-                      <Label htmlFor="reg-student" className="cursor-pointer">Student</Label>
+                      <Label htmlFor="reg-student" className="cursor-pointer">
+                        Student
+                      </Label>
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="teacher" id="reg-teacher" />
-                      <Label htmlFor="reg-teacher" className="cursor-pointer">Teacher</Label>
+                      <Label htmlFor="reg-teacher" className="cursor-pointer">
+                        Teacher
+                      </Label>
                     </div>
                   </RadioGroup>
                 </div>
@@ -141,10 +167,7 @@ const Register = () => {
           <CardFooter className="flex justify-center">
             <div className="text-sm text-center">
               Already have an account?{" "}
-              <Link
-                to="/login"
-                className="text-edu-primary hover:underline font-medium"
-              >
+              <Link to="/login" className="text-edu-primary hover:underline font-medium">
                 Sign in
               </Link>
             </div>
