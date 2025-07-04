@@ -45,12 +45,12 @@ const App = () => (
             <Route path="/register" element={<Register />} />
 
             {/* Shared App Layout - default */}
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<Login />} />
-              <Route path="materials" element={<Materials />} />
-              <Route path="profile" element={<Profile />} />
-              <Route path="dashboard" element={<RoleBasedDashboard />} />
-            </Route>
+            {/* Shared App Layout - default (for authenticated users) */}
+<Route path="/" element={<AppLayout />}>
+  <Route index element={<RoleBasedDashboard />} /> {/* Auto-redirect based on role */}
+  <Route path="materials" element={<Materials />} />
+  <Route path="profile" element={<Profile />} />
+</Route>
 
             {/* Student routes */}
             <Route path="/dashboard" element={<AppLayout requiredRole="student" />}>
@@ -65,11 +65,20 @@ const App = () => (
             </Route>
 
             {/* Teacher routes */}
-            <Route path="/teacher" element={<AppLayout requiredRole="teacher" />}>
-              <Route path="dashboard" element={<TeacherDashboard />} />
-              <Route path="upload" element={<MaterialUpload />} />
-              <Route path="students" element={<Students />} />
-            </Route>
+{/* Teacher routes */}
+{/* Teacher routes */}
+<Route path="/teacher/dashboard" element={<AppLayout requiredRole="teacher" />}>
+  <Route index element={<TeacherDashboard />} />
+</Route>
+<Route path="/upload" element={<AppLayout requiredRole="teacher" />}>
+  <Route index element={<MaterialUpload />} />
+</Route>
+<Route path="/students" element={<AppLayout requiredRole="teacher" />}>
+  <Route index element={<Students />} />
+</Route>
+
+
+
 
             {/* Admin routes */}
             <Route path="/admin" element={<AppLayout requiredRole="admin" />}>

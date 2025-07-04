@@ -40,7 +40,7 @@ const Unauthorized = () => {
             } else if (user?.role === "teacher") {
               navigate("/teacher/dashboard");
             } else if (user?.role === "student") {
-              navigate("/student/dashboard");
+              navigate("/dashboard");
             } else {
               navigate("/");
             }

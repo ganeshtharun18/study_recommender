@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navbar } from "./Navbar";
 import { Sidebar } from "./Sidebar";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +12,19 @@ export const AppLayout = ({ requiredRole }: AppLayoutProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const { user, isAuthenticated, loading } = useAuth();
 
+  // Log everything for debugging
+  useEffect(() => {
+    console.log("🔍 AppLayout Debug:");
+    console.log("isAuthenticated:", isAuthenticated);
+    console.log("loading:", loading);
+    console.log("user:", user);
+    console.log("requiredRole:", requiredRole);
+    console.log("user?.role:", user?.role);
+    if (requiredRole && user?.role !== requiredRole) {
+      console.warn("🚫 Access denied: role mismatch");
+    }
+  }, [isAuthenticated, loading, user, requiredRole]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -24,13 +36,13 @@ export const AppLayout = ({ requiredRole }: AppLayoutProps) => {
     );
   }
 
-  // Redirect to login if not authenticated
   if (!isAuthenticated) {
+    console.warn("🔐 Redirecting to login: user not authenticated");
     return <Navigate to="/login" />;
   }
 
-  // Check if user has required role
   if (requiredRole && user?.role !== requiredRole) {
+    console.warn(`❌ Unauthorized: Required "${requiredRole}", but user has "${user?.role}"`);
     return <Navigate to="/unauthorized" />;
   }
 

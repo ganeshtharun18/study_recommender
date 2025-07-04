@@ -21,7 +21,7 @@ const Materials = () => {
 
         {isTeacherOrAdmin && (
           <Button 
-            onClick={() => navigate("/upload")}
+            onClick={() => navigate("/teacher/upload")}
             className="bg-edu-primary hover:bg-edu-primary/90"
           >
             <Plus className="mr-2 h-4 w-4" />

@@ -34,7 +34,16 @@ const Login = () => {
 
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
-      navigate("/dashboard");
+      const storedUser = localStorage.getItem("user");
+      const role = storedUser ? JSON.parse(storedUser).role : "student";
+
+      if (role === "teacher") {
+        navigate("/teacher/dashboard");
+      } else if (role === "admin") {
+        navigate("/admin");
+      } else {
+        navigate("/dashboard");
+      }
     }
   }, [isAuthenticated, authLoading, navigate]);
 
@@ -46,7 +55,17 @@ const Login = () => {
     try {
       await login(formData.email, formData.password);
       toast.success("Login successful!");
-      navigate("/dashboard");
+
+      const storedUser = localStorage.getItem("user");
+      const role = storedUser ? JSON.parse(storedUser).role : "student";
+
+      if (role === "teacher") {
+        navigate("/teacher/dashboard");
+      } else if (role === "admin") {
+        navigate("/admin");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err) {
       setError("Invalid credentials. Please try again.");
       toast.error("Login failed. Please check your credentials.");

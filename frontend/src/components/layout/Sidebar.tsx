@@ -43,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       { to: "/profile", icon: <User className="h-5 w-5" />, label: "Profile" },
     ],
     teacher: [
-      { to: "/dashboard", icon: <Home className="h-5 w-5" />, label: "Dashboard" },
+      { to: "/teacher/dashboard", icon: <Home className="h-5 w-5" />, label: "Dashboard" },
       { to: "/materials", icon: <BookOpen className="h-5 w-5" />, label: "Study Materials" },
       { to: "/upload", icon: <Upload className="h-5 w-5" />, label: "Upload Material" },
       { to: "/students", icon: <Users className="h-5 w-5" />, label: "My Students" },
