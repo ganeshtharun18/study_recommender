@@ -1,4 +1,4 @@
-
+// src/pages/Profile.tsx
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,14 +7,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { User, Lock, Bell } from "lucide-react";
+import api from "@/lib/api";
+import { updateProfile, changePassword } from "@/lib/api"; 
 
 const Profile = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
-  
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   const getInitials = (name: string) => {
     return name
       .split(" ")
@@ -23,16 +28,32 @@ const Profile = () => {
       .toUpperCase();
   };
 
-  const handleSaveProfile = () => {
-    // In a real app, this would update the user profile
+  const handleSaveProfile = async () => {
+  try {
+    await updateProfile(name, email);
     toast.success("Profile updated successfully");
-  };
+  } catch (err) {
+    toast.error("Failed to update profile");
+    console.error(err);
+  }
+};
 
-  const handleChangePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    // In a real app, this would send a password change request
-    toast.success("Password change request sent");
-  };
+  const handleChangePassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  const currentPassword = (document.getElementById("current-password") as HTMLInputElement).value;
+  const newPassword = (document.getElementById("new-password") as HTMLInputElement).value;
+  const confirmPassword = (document.getElementById("confirm-password") as HTMLInputElement).value;
+
+  try {
+    await changePassword(currentPassword, newPassword, confirmPassword);
+    toast.success("Password changed successfully");
+  } catch (err) {
+    toast.error("Failed to change password");
+    console.error(err);
+  }
+};
+
 
   return (
     <div className="space-y-8">
@@ -75,7 +96,7 @@ const Profile = () => {
                 <span>Notifications</span>
               </TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="general">
               <Card>
                 <CardHeader>
@@ -92,7 +113,7 @@ const Profile = () => {
                       placeholder="Your full name"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="email">Email Address</Label>
                     <Input 
@@ -103,7 +124,7 @@ const Profile = () => {
                       placeholder="Your email address"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="role">Role</Label>
                     <Input 
@@ -113,7 +134,7 @@ const Profile = () => {
                       className="bg-muted"
                     />
                   </div>
-                  
+
                   <Button 
                     className="w-full mt-4 bg-edu-primary hover:bg-edu-primary/90"
                     onClick={handleSaveProfile}
@@ -123,7 +144,7 @@ const Profile = () => {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="security">
               <Card>
                 <CardHeader>
@@ -137,28 +158,34 @@ const Profile = () => {
                       <Input 
                         id="current-password" 
                         type="password" 
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
                         placeholder="Enter your current password"
                       />
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label htmlFor="new-password">New Password</Label>
                       <Input 
                         id="new-password" 
                         type="password" 
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
                         placeholder="Enter new password"
                       />
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label htmlFor="confirm-password">Confirm New Password</Label>
                       <Input 
                         id="confirm-password" 
                         type="password" 
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Confirm new password"
                       />
                     </div>
-                    
+
                     <Button type="submit" className="w-full mt-4">
                       Change Password
                     </Button>
@@ -166,7 +193,7 @@ const Profile = () => {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="notifications">
               <Card>
                 <CardHeader>

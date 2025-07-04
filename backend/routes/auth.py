@@ -485,3 +485,101 @@ def get_students():
 # scheduler = BackgroundScheduler()
 # scheduler.add_job(cleanup_expired_tokens, 'interval', hours=1)
 # scheduler.start()
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith("Bearer "):
+                token = auth_header.split(" ")[1]
+
+        if not token:
+            return jsonify({'error': 'Token is missing'}), 401
+
+        try:
+            # ✅ Use app config secret
+            data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+
+            current_user = {
+                "id": data["user_id"],
+                "email": data["email"],
+                "role": data["role"],
+                "name": data["name"]
+            }
+
+        except Exception as e:
+            print("JWT decode failed:", str(e))  # ✅ will show specific cause now
+            return jsonify({'error': 'Invalid token'}), 401
+
+        return f(current_user, *args, **kwargs)
+
+    return decorated
+
+@bp.route('/update_profile', methods=['PUT','POST'])
+@token_required
+def update_profile(current_user):
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip().lower()
+
+    if not name or not email:
+        return jsonify({"error": "Name and email are required"}), 400
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE users SET name=%s, email=%s WHERE id=%s
+        """, (name, email, current_user['id']))
+        conn.commit()
+
+        return jsonify({"message": "Profile updated successfully"}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Profile update error: {str(e)}")
+        return jsonify({"error": "Profile update failed"}), 500
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+
+@bp.route('/change_password', methods=['POST'])
+@token_required
+def change_password(current_user):
+    data = request.get_json()
+    current_password = data.get("currentPassword", "")
+    new_password = data.get("newPassword", "")
+
+    if len(new_password) < 8:
+        return jsonify({"error": "New password must be at least 8 characters"}), 400
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("SELECT hashed_password FROM users WHERE id = %s", (current_user['id'],))
+        user = cursor.fetchone()
+
+        if not user or not check_password_hash(user['hashed_password'], current_password):
+            return jsonify({"error": "Incorrect current password"}), 401
+
+        new_hashed = generate_password_hash(new_password)
+
+        cursor.execute("UPDATE users SET hashed_password = %s WHERE id = %s", (new_hashed, current_user['id']))
+        conn.commit()
+
+        return jsonify({"message": "Password updated successfully"}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Password change error: {str(e)}")
+        return jsonify({"error": "Failed to change password"}), 500
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
