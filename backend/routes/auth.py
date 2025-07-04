@@ -583,3 +583,39 @@ def change_password(current_user):
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
+
+import os
+from werkzeug.utils import secure_filename
+
+UPLOAD_FOLDER = os.path.join('static', 'avatars')  # relative to project root
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+@bp.route('/upload_avatar', methods=['POST'])
+@token_required
+def upload_avatar(current_user):
+    if 'avatar' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+
+    file = request.files['avatar']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    filename = secure_filename(file.filename)
+
+    # ✅ Add this line to debug the actual save path
+    file_path = os.path.join(current_app.root_path, 'static', 'avatars', filename)
+    print("Saving avatar to:", file_path)  # <--- Add this line
+
+    file.save(file_path)
+
+    avatar_url = f"/static/avatars/{filename}"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET avatar=%s WHERE id=%s", (avatar_url, current_user['id']))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({"message": "Avatar uploaded", "avatarUrl": avatar_url}), 200

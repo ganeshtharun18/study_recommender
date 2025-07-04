@@ -159,6 +159,23 @@ app.register_blueprint(quiz_bp)
 app.register_blueprint(youtube_bp)
 app.register_blueprint(streak_bp)
 
+
+# Inside your app.py
+#from flask import send_from_directory
+
+#@app.route('/static/avatars/<filename>')
+#def avatar(filename):
+    #return send_from_directory('uploads', filename)
+import os
+from flask import send_from_directory
+
+AVATAR_FOLDER = os.path.join(app.root_path, 'static', 'avatars')
+os.makedirs(AVATAR_FOLDER, exist_ok=True)
+@app.route('/static/avatars/<filename>')
+def serve_avatar(filename):
+    return send_from_directory(os.path.join(app.root_path, 'static', 'avatars'), filename)
+
+
 if __name__ == '__main__':
     # Verify API key on startup
     if not verify_openrouter_key():
