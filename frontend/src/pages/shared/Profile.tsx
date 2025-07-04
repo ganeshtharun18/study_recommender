@@ -21,6 +21,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { User, Lock, Bell } from "lucide-react";
 import { updateProfile, changePassword } from "@/lib/api";
@@ -34,6 +35,7 @@ const Profile = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [open, setOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const getInitials = (name: string) => {
@@ -106,6 +108,11 @@ const Profile = () => {
     }
   };
 
+  const avatarUrl =
+    user?.avatar?.startsWith("http")
+      ? user.avatar
+      : `${BACKEND_URL}${user?.avatar || ""}`;
+
   return (
     <div className="space-y-8">
       <div>
@@ -116,21 +123,26 @@ const Profile = () => {
       <div className="flex flex-col md:flex-row gap-8">
         <Card className="w-full md:w-1/3 md:sticky md:top-20 md:self-start">
           <CardContent className="pt-6 flex flex-col items-center text-center">
-            <Avatar className="h-24 w-24 mb-4">
-              <AvatarImage
-                src={
-                  user?.avatar
-                    ? user.avatar.startsWith("http")
-                      ? user.avatar
-                      : `${BACKEND_URL}${user.avatar}`
-                    : ""
-                }
-                alt={user?.name}
-              />
-              <AvatarFallback className="text-2xl">
-                {user ? getInitials(user.name) : "??"}
-              </AvatarFallback>
-            </Avatar>
+            <Dialog open={open} onOpenChange={setOpen}>
+              <DialogTrigger asChild>
+                <div className="cursor-pointer">
+                  <Avatar className="h-24 w-24 mb-4">
+                    <AvatarImage src={avatarUrl} alt={user?.name} />
+                    <AvatarFallback className="text-2xl">
+                      {user ? getInitials(user.name) : "??"}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+              </DialogTrigger>
+              <DialogContent className="p-4 max-w-sm sm:max-w-md">
+                <img
+                  src={avatarUrl}
+                  alt="Enlarged Avatar"
+                  className="rounded-xl w-full object-contain"
+                />
+              </DialogContent>
+            </Dialog>
+
             <h2 className="text-xl font-semibold">{user?.name}</h2>
             <p className="text-muted-foreground">{user?.email}</p>
             <p className="capitalize text-sm bg-edu-primary/10 text-edu-primary px-2 py-0.5 rounded-full mt-2">
