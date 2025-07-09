@@ -6,6 +6,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
+import {jwtDecode} from 'jwt-decode';
 
 // Type definitions
 type Material = {
@@ -62,6 +63,8 @@ type ApiResponse<T> = {
   success?: boolean;
 };
 
+type ProgressStatus = 'To Learn' | 'In Progress' | 'Completed';
+
 const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => (
   <div className="p-4 space-y-3 bg-red-50 rounded-lg border border-red-200">
     <h3 className="text-red-600 font-medium">Something went wrong</h3>
@@ -90,10 +93,78 @@ const MaterialsBrowser = () => {
     recommendations: false,
     videos: false,
     quiz: false,
-    submission: false
+    submission: false,
+    progress: false
   });
   const [error, setError] = useState<string | null>(null);
 
+  // Track material progress
+ // Install with: npm install jwt-decode
+
+interface JwtPayload {
+  email?: string;
+  // Add other expected JWT fields (e.g., role, sub)
+}
+
+const trackProgress = useCallback(async (materialId: number, status: ProgressStatus) => {
+  try {
+    setLoading(prev => ({ ...prev, progress: true }));
+
+    // 1. Get token from storage
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      throw new Error("User not authenticated");
+    }
+
+    // 2. Decode token to get user email
+    const decoded = jwtDecode<JwtPayload>(token);
+    const userEmail = decoded.email;
+    
+    if (!userEmail) {
+      throw new Error("User email not found in token");
+    }
+
+    // 3. Make the request with token and dynamic email
+    const response = await axios.post(
+      '/api/progress/update',
+      {
+        user_email: userEmail, // Dynamic email from JWT
+        material_id: materialId,
+        status: status
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.data.success) {
+      throw new Error(response.data.error || 'Failed to update progress');
+    }
+
+    toast.success('Progress updated', {
+      description: `Material marked as ${status}`,
+      action: {
+        label: 'Dismiss',
+        onClick: () => {}
+      }
+    });
+  } catch (err) {
+    const error = err as AxiosError | Error;
+    const message = axios.isAxiosError(error)
+      ? error.response?.data?.error || error.message
+      : error.message;
+    
+    console.error('Progress tracking error:', error);
+    toast.error('Failed to update progress', {
+      description: message
+    });
+  } finally {
+    setLoading(prev => ({ ...prev, progress: false }));
+  }
+}, []);
   const isValidUrl = (url: string) => {
     try {
       new URL(url);
@@ -117,8 +188,6 @@ const MaterialsBrowser = () => {
           'Accept': 'application/json'
         }
       });
-
-      console.log('API Response:', response.data);
 
       let materialsData = response.data.data || response.data;
       
@@ -207,12 +276,6 @@ const MaterialsBrowser = () => {
         timeout: 15000
       });
 
-      console.log('YouTube API raw response:', response.data);
-
-      if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE html>')) {
-        throw new Error('YouTube API returned HTML instead of JSON. Check backend service.');
-      }
-
       const responseData = response.data?.items || response.data?.data || response.data;
       
       if (!responseData) {
@@ -264,93 +327,71 @@ const MaterialsBrowser = () => {
     }
   }, []);
 
-// In your fetchQuizQuestions function:
+  const fetchQuizQuestions = useCallback(async (topic: string) => {
+    try {
+      setLoading(prev => ({ ...prev, quiz: true }));
+      setAnswers({});
+      setScore(null);
 
-const fetchQuizQuestions = useCallback(async (topic: string) => {
-  try {
-    setLoading(prev => ({ ...prev, quiz: true }));
-    setAnswers({});
-    setScore(null);
-
-    const response = await axios.get(
-      `http://localhost:5000/api/quiz/questions/${encodeURIComponent(topic)}`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        validateStatus: (status) => status < 500 // Don't throw for 4xx errors
-      }
-    );
-
-    console.log("Full API response:", {
-      status: response.status,
-      data: response.data,
-      headers: response.headers
-    });
-
-    // Handle non-success status codes
-    if (response.status !== 200 || !response.data) {
-      throw new Error(
-        response.data?.error || 
-        `Request failed with status ${response.status}`
+      const response = await axios.get(
+        `http://localhost:5000/api/quiz/questions/${encodeURIComponent(topic)}`,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          validateStatus: (status) => status < 500
+        }
       );
+
+      if (response.status !== 200 || !response.data) {
+        throw new Error(
+          response.data?.error || 
+          `Request failed with status ${response.status}`
+        );
+      }
+
+      const questions = response.data.data || response.data;
+      
+      if (!Array.isArray(questions)) {
+        throw new Error('Expected array of questions');
+      }
+
+      const validatedQuestions = questions.map(question => ({
+        id: question.id || Math.random().toString(36).substring(2, 9),
+        topic: question.topic || topic,
+        question: question.question || 'No question text',
+        options: {
+          a: question.options?.a || question.option_a || 'Option A',
+          b: question.options?.b || question.option_b || 'Option B',
+          c: question.options?.c || question.option_c || 'Option C',
+          d: question.options?.d || question.option_d || 'Option D'
+        },
+        correctAnswer: ['a', 'b', 'c', 'd'].includes(question.correctAnswer?.toLowerCase())
+          ? question.correctAnswer.toLowerCase() as 'a' | 'b' | 'c' | 'd'
+          : 'a'
+      }));
+
+      setQuizQuestions(validatedQuestions);
+      toast.success(`Loaded ${validatedQuestions.length} questions`);
+    } catch (err) {
+      const error = err as Error | AxiosError;
+      let errorMessage = 'Failed to load quiz';
+      if (axios.isAxiosError(error)) {
+        errorMessage = error.response?.data?.error || 
+                      error.response?.data?.message || 
+                      error.message;
+      } else {
+        errorMessage = error.message;
+      }
+      
+      console.error('Quiz fetch error:', error);
+      toast.error(errorMessage);
+      setQuizQuestions([]);
+    } finally {
+      setLoading(prev => ({ ...prev, quiz: false }));
     }
-
-    // Check for success flag if your API uses it
-    if (response.data.success === false) {
-      throw new Error(response.data.error || 'API returned unsuccessful');
-    }
-
-    // Transform data - add your transformation logic here
-    const questions = response.data.data || response.data; // Handle both formats
-    
-    if (!Array.isArray(questions)) {
-      throw new Error('Expected array of questions');
-    }
-
-    const validatedQuestions = questions.map(question => ({
-      id: question.id || Math.random().toString(36).substring(2, 9),
-      topic: question.topic || topic,
-      question: question.question || 'No question text',
-      options: {
-        a: question.options?.a || question.option_a || 'Option A',
-        b: question.options?.b || question.option_b || 'Option B',
-        c: question.options?.c || question.option_c || 'Option C',
-        d: question.options?.d || question.option_d || 'Option D'
-      },
-      correctAnswer: ['a', 'b', 'c', 'd'].includes(question.correctAnswer?.toLowerCase())
-        ? question.correctAnswer.toLowerCase() as 'a' | 'b' | 'c' | 'd'
-        : 'a'
-    }));
-
-    setQuizQuestions(validatedQuestions);
-    toast.success(`Loaded ${validatedQuestions.length} questions`);
-
-  } catch (err) {
-    const error = err as Error | AxiosError;
-    
-    let errorMessage = 'Failed to load quiz';
-    if (axios.isAxiosError(error)) {
-      errorMessage = error.response?.data?.error || 
-                    error.response?.data?.message || 
-                    error.message;
-      console.error('API error details:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        headers: error.response?.headers
-      });
-    } else {
-      errorMessage = error.message;
-    }
-    
-    console.error('Quiz fetch error:', error);
-    toast.error(errorMessage);
-    setQuizQuestions([]);
-  } finally {
-    setLoading(prev => ({ ...prev, quiz: false }));
-  }
-}, []);
+  }, []);
 
   const handleAnswerSelect = useCallback((questionId: string, answer: string) => {
     setAnswers(prev => ({
@@ -359,12 +400,10 @@ const fetchQuizQuestions = useCallback(async (topic: string) => {
     }));
   }, []);
 
-
-    const submitQuiz = useCallback(async () => {
+  const submitQuiz = useCallback(async () => {
     try {
       setLoading(prev => ({ ...prev, submission: true }));
       
-      // Validate all questions are answered
       if (Object.keys(answers).length !== quizQuestions.length) {
         throw new Error('Please answer all questions before submitting');
       }
@@ -399,6 +438,14 @@ const fetchQuizQuestions = useCallback(async (topic: string) => {
 
       setScore(quizResult);
       
+      // Track quiz completion progress
+      if (quizResult.percentage >= 70) {
+        const material = materials.find(m => m.topic === selectedTopic);
+        if (material) {
+          await trackProgress(material.id, 'Completed');
+        }
+      }
+
       toast.success('Quiz submitted!', {
         description: `You scored ${quizResult.correct}/${quizResult.total} (${quizResult.percentage}%)`,
         action: {
@@ -419,23 +466,26 @@ const fetchQuizQuestions = useCallback(async (topic: string) => {
     } finally {
       setLoading(prev => ({ ...prev, submission: false }));
     }
-  }, [answers, selectedTopic, quizQuestions.length]);
+  }, [answers, selectedTopic, quizQuestions.length, materials, trackProgress]);
 
   const handleQuizSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     await submitQuiz();
   }, [submitQuiz]);
 
-
-  const handleMaterialSelect = useCallback((topic: string) => {
-    setSelectedTopic(topic);
+  const handleMaterialSelect = useCallback((material: Material) => {
+    setSelectedTopic(material.topic);
     setAnswers({});
     setScore(null);
     
-    fetchRecommendations(topic);
-    fetchYouTubeVideos(topic);
-    fetchQuizQuestions(topic);
-  }, [fetchRecommendations, fetchYouTubeVideos, fetchQuizQuestions]);
+    // Track material access
+    trackProgress(material.id, 'In Progress');
+    
+    fetchRecommendations(material.topic);
+    fetchYouTubeVideos(material.topic);
+    fetchQuizQuestions(material.topic);
+  }, [fetchRecommendations, fetchYouTubeVideos, fetchQuizQuestions, trackProgress]);
+
   useEffect(() => {
     fetchMaterials();
   }, [fetchMaterials]);
@@ -528,6 +578,16 @@ const fetchQuizQuestions = useCallback(async (topic: string) => {
                       target="_blank" 
                       rel="noopener noreferrer"
                       className="flex-1"
+                      onClick={() => {
+                        trackProgress(material.id, 'In Progress');
+                        toast.info('Material accessed', {
+                          description: `You're viewing: ${material.title}`,
+                          action: {
+                            label: 'Dismiss',
+                            onClick: () => {}
+                          }
+                        });
+                      }}
                     >
                       <Button variant="outline" className="w-full">
                         View
@@ -535,7 +595,7 @@ const fetchQuizQuestions = useCallback(async (topic: string) => {
                     </a>
                   )}
                   <Button 
-                    onClick={() => handleMaterialSelect(material.topic)}
+                    onClick={() => handleMaterialSelect(material)}
                     disabled={loading.recommendations || loading.videos}
                     className="flex-1"
                   >
@@ -610,6 +670,19 @@ const fetchQuizQuestions = useCallback(async (topic: string) => {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-block"
+                          onClick={() => {
+                            toast.info('Video accessed', {
+                              description: `You're watching: ${video.title}`,
+                              action: {
+                                label: 'Dismiss',
+                                onClick: () => {}
+                              }
+                            });
+                            const material = materials.find(m => m.topic === selectedTopic);
+                            if (material) {
+                              trackProgress(material.id, 'In Progress');
+                            }
+                          }}
                         >
                           <Button size="sm" className="mt-2">
                             Watch

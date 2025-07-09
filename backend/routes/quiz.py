@@ -121,7 +121,7 @@ def submit_quiz():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        
+
         # Calculate score
         score = 0
         for answer in data['answers']:
@@ -131,26 +131,28 @@ def submit_quiz():
             correct = cursor.fetchone()
             if correct and correct['correct_option'] == answer['selected']:
                 score += 1
-        
+
         # Store result
         total = len(data['answers'])
         percentage = int((score / total) * 100) if total > 0 else 0
-        
+
+        # FIXED SQL: Only 3 columns, 3 values
         cursor.execute("""
             INSERT INTO quiz_results 
-            (user_email, topic, score, total_questions) 
-            VALUES (%s, %s, %s, %s)
-        """, (data['user_email'], data['topic'], percentage, total))
-        
+            (user_email, topic, score) 
+            VALUES (%s, %s, %s)
+        """, (data['user_email'], data['topic'], percentage))
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+        result_id = cursor.lastrowid
         return jsonify({
             "status": "success",
             "score": percentage,
             "correct": score,
-            "total": total
+            "total": total,
+            "result_id": result_id  # ✅ include this so React can navigate correctly
         })
     except KeyError as e:
         logger.error(f"Missing field in quiz submission: {str(e)}")
@@ -158,6 +160,7 @@ def submit_quiz():
     except Exception as e:
         logger.error(f"Error submitting quiz: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 @bp.route('/results/<user_email>', methods=['GET'])
 def get_user_results(user_email):
@@ -324,3 +327,21 @@ def generate_question():
             cursor.close()
         if conn:
             conn.close()
+
+@bp.route('/results/id/<int:result_id>', methods=['GET'])
+def get_result_by_id(result_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM quiz_results WHERE id = %s", (result_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"error": "Result not found"}), 404
+
+        result['attempted_at'] = result['attempted_at'].isoformat()
+        return jsonify({"status": "success", "data": result})
+
+    except Exception as e:
+        logger.error(f"Error fetching result by ID: {str(e)}")
+        return jsonify({"error": str(e)}), 500

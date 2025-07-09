@@ -428,25 +428,23 @@ def get_dashboard_stats():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # 1. Overall statistics
+        # 1. Overall statistics - Fixed CROSS JOIN issues
         cursor.execute("""
             SELECT 
-                COUNT(DISTINCT u.id) AS total_students,
-                COUNT(DISTINCT s.id) AS total_subjects,
-                COUNT(DISTINCT sm.id) AS total_materials,
-                AVG(
+                (SELECT COUNT(*) FROM users WHERE role = 'student') AS total_students,
+                (SELECT COUNT(*) FROM subjects) AS total_subjects,
+                (SELECT COUNT(*) FROM study_materials) AS total_materials,
+                COALESCE(AVG(
                     (SELECT COUNT(*) FROM user_progress up 
                      WHERE up.user_email = u.email AND up.status = 'Completed') / 
                     GREATEST((SELECT COUNT(*) FROM study_materials), 1) * 100
-                ) AS avg_completion
+                ), 0) AS avg_completion
             FROM users u
-            CROSS JOIN subjects s
-            CROSS JOIN study_materials sm
             WHERE u.role = 'student'
         """)
         overview = cursor.fetchone()
 
-        # 2. Subject-wise progress
+        # 2. Subject-wise progress - No changes needed here
         cursor.execute("""
             SELECT 
                 s.id, 
@@ -466,15 +464,20 @@ def get_dashboard_stats():
         """)
         top_subjects = cursor.fetchall()
 
-        # 3. Student progress
+        # 3. Student progress - Added material counts and fixed last_activity
         cursor.execute("""
             SELECT 
                 u.id,
                 u.name,
                 u.email,
+                (SELECT COUNT(*) FROM study_materials) AS total_materials,
                 COUNT(DISTINCT up.material_id) AS materials_accessed,
                 COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN up.material_id END) AS completed,
-                MAX(up.updated_at) AS last_activity
+                COALESCE(MAX(up.updated_at), u.created_at) AS last_activity,
+                ROUND(
+                    COUNT(DISTINCT CASE WHEN up.status = 'Completed' THEN up.material_id END) / 
+                    GREATEST((SELECT COUNT(*) FROM study_materials), 1) * 100, 1
+                ) AS completion_percentage
             FROM users u
             LEFT JOIN user_progress up ON u.email = up.user_email
             WHERE u.role = 'student'
@@ -489,7 +492,7 @@ def get_dashboard_stats():
                 'total_students': overview['total_students'],
                 'total_subjects': overview['total_subjects'],
                 'total_materials': overview['total_materials'],
-                'avg_completion': float(overview['avg_completion']) if overview['avg_completion'] else 0
+                'avg_completion': overview['avg_completion']
             },
             'top_subjects': top_subjects,
             'recent_students': recent_students

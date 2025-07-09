@@ -28,6 +28,7 @@ import Settings from "./pages/admin/Settings";
 
 import Materials from "./pages/shared/Materials";
 import Profile from "./pages/shared/Profile";
+import ResultsPage from "./pages/student/ResultPage";
 
 const queryClient = new QueryClient();
 
@@ -64,6 +65,8 @@ const App = () => (
               <Route index element={<ProgressPage />} />
             </Route>
 
+            <Route path="results/:id" element={<ResultsPage />} />
+
             {/* Teacher routes */}
 {/* Teacher routes */}
 {/* Teacher routes */}
@@ -97,6 +100,8 @@ const App = () => (
             {/* Error/utility routes */}
             <Route path="/unauthorized" element={<Unauthorized />} />
             <Route path="*" element={<NotFound />} />
+
+
 
           </Routes>
         </BrowserRouter>

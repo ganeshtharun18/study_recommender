@@ -20,9 +20,9 @@ export const apiFetch = async (
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
-console.log("Token being sent:", token);
+  console.log("Token being sent:", token);
 
-  // ✅ Add Authorization header if token is present
+  // Add Authorization header if token is present
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -116,6 +116,82 @@ export const getProgressStats = async (userEmail: string) => {
   return apiFetch(`${API_BASE}/api/progress/stats/${encodeURIComponent(userEmail)}`);
 };
 
+// --- Dashboard Stats ---
+interface DashboardStatsResponse {
+  overview: {
+    total_students: number;
+    total_subjects: number;
+    total_materials: number;
+    avg_completion: number;
+  };
+  top_subjects: {
+    id: string;
+    name: string;
+    total_materials: number;
+    completed: number;
+    completion_rate: number;
+  }[];
+  recent_students: Array<{
+    id: string;
+    name: string;
+    email: string;
+    created_at: string;
+    last_activity: string;
+    materials_accessed: number;
+    completed: number;
+    total_materials: number;
+    completion_percentage: number;
+  }>;
+}
+
+// Update the getDashboardStats function with proper typing
+export const getDashboardStats = async (): Promise<DashboardStatsResponse> => {
+  try {
+    const response = await apiFetch(`${API_BASE}/api/progress/dashboard-stats`);
+    
+    // Transform the data to ensure proper typing
+    return {
+      overview: {
+        total_students: Number(response.overview.total_students) || 0,
+        total_subjects: Number(response.overview.total_subjects) || 0,
+        total_materials: Number(response.overview.total_materials) || 0,
+        avg_completion: parseFloat(response.overview.avg_completion) || 0,
+      },
+      top_subjects: response.top_subjects.map(subject => ({
+        id: subject.id,
+        name: subject.name,
+        total_materials: Number(subject.total_materials) || 0,
+        completed: Number(subject.completed) || 0,
+        completion_rate: parseFloat(subject.completion_rate) || 0,
+      })),
+      recent_students: response.recent_students.map(student => ({
+        id: student.id,
+        name: student.name,
+        email: student.email,
+        created_at: student.created_at,
+        last_activity: student.last_activity || student.created_at,
+        materials_accessed: Number(student.materials_accessed) || 0,
+        completed: Number(student.completed) || 0,
+        total_materials: Number(student.total_materials) || 0,
+        completion_percentage: parseFloat(student.completion_percentage) || 0,
+      }))
+    };
+  } catch (error) {
+    console.error('Failed to fetch dashboard stats:', error);
+    // Return default values if the request fails
+    return {
+      overview: {
+        total_students: 0,
+        total_subjects: 0,
+        total_materials: 0,
+        avg_completion: 0,
+      },
+      top_subjects: [],
+      recent_students: []
+    };
+  }
+};
+
 // --- Students ---
 export const getStudents = async (page: number, perPage: number, searchQuery: string) => {
   const params = new URLSearchParams();
@@ -137,9 +213,14 @@ export async function submitQuiz(
   topic: string,
   answers: { id: number; selected: string }[]
 ) {
+  const formattedAnswers = answers.map(a => ({
+    question_id: a.id,
+    selected: a.selected,
+  }));
+
   return apiFetch(`${API_BASE}/api/quiz/submit`, {
     method: "POST",
-    body: JSON.stringify({ user_email: userEmail, topic, answers }),
+    body: JSON.stringify({ user_email: userEmail, topic, answers: formattedAnswers }),
   });
 }
 
@@ -169,6 +250,7 @@ export default {
   getProgressSummary,
   getRecentMaterials,
   getProgressStats,
+  getDashboardStats, // Added this new export
   getStudents,
   fetchQuizQuestions,
   submitQuiz,

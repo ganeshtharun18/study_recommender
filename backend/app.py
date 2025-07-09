@@ -21,7 +21,7 @@ load_dotenv()
 class Config:
     OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
     SECRET_KEY = os.getenv('SECRET_KEY', 'default-secret-key')
-    RATE_LIMIT = "5/minute"
+    RATE_LIMIT = "30/minute"
     DEFAULT_MODEL = "deepseek/deepseek-r1-0528:free"
     DB_HOST = os.getenv('DB_HOST')
     DB_USER = os.getenv('DB_USER')

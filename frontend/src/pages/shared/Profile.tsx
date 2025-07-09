@@ -21,7 +21,14 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { User, Lock, Bell } from "lucide-react";
 import { updateProfile, changePassword } from "@/lib/api";
@@ -94,8 +101,6 @@ const Profile = () => {
       });
 
       const data = await res.json();
-      console.log("Avatar upload response:", data);
-
       if (res.ok) {
         toast.success("Avatar updated!");
         updateUser({ ...user, avatar: data.avatarUrl });
@@ -135,6 +140,12 @@ const Profile = () => {
                 </div>
               </DialogTrigger>
               <DialogContent className="p-4 max-w-sm sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Profile Picture</DialogTitle>
+                  <DialogDescription>
+                    This is your current profile picture. Click outside to close.
+                  </DialogDescription>
+                </DialogHeader>
                 <img
                   src={avatarUrl}
                   alt="Enlarged Avatar"
@@ -176,10 +187,7 @@ const Profile = () => {
                 <Lock className="h-4 w-4" />
                 <span>Security</span>
               </TabsTrigger>
-              <TabsTrigger
-                value="notifications"
-                className="flex items-center gap-1"
-              >
+              <TabsTrigger value="notifications" className="flex items-center gap-1">
                 <Bell className="h-4 w-4" />
                 <span>Notifications</span>
               </TabsTrigger>
@@ -189,9 +197,7 @@ const Profile = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>General Information</CardTitle>
-                  <CardDescription>
-                    Update your basic profile details
-                  </CardDescription>
+                  <CardDescription>Update your basic profile details</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -239,9 +245,7 @@ const Profile = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Security Settings</CardTitle>
-                  <CardDescription>
-                    Manage your password and account security
-                  </CardDescription>
+                  <CardDescription>Manage your password and account security</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleChangePassword} className="space-y-4">
@@ -290,9 +294,7 @@ const Profile = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Notification Preferences</CardTitle>
-                  <CardDescription>
-                    Control how you receive notifications
-                  </CardDescription>
+                  <CardDescription>Control how you receive notifications</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <p className="text-center text-muted-foreground py-8">

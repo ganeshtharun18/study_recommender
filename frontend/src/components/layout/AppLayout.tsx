@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Navbar } from "./Navbar";
 import { Sidebar } from "./Sidebar";
 import { useAuth } from "@/contexts/AuthContext";
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 interface AppLayoutProps {
   requiredRole?: "student" | "teacher" | "admin";
@@ -11,6 +11,7 @@ interface AppLayoutProps {
 export const AppLayout = ({ requiredRole }: AppLayoutProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const { user, isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
   // Log everything for debugging
   useEffect(() => {
@@ -38,12 +39,12 @@ export const AppLayout = ({ requiredRole }: AppLayoutProps) => {
 
   if (!isAuthenticated) {
     console.warn("🔐 Redirecting to login: user not authenticated");
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   if (requiredRole && user?.role !== requiredRole) {
     console.warn(`❌ Unauthorized: Required "${requiredRole}", but user has "${user?.role}"`);
-    return <Navigate to="/unauthorized" />;
+    return <Navigate to="/unauthorized" replace />;
   }
 
   return (
