@@ -26,7 +26,7 @@ const Login = () => {
   const [formData, setFormData] = useState({
     email: "",
     password: "",
-    role: "student" as UserRole, // Still preserved for display
+    role: "student" as UserRole,
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -150,10 +150,6 @@ const Login = () => {
                       <RadioGroupItem value="teacher" id="teacher" />
                       <Label htmlFor="teacher" className="cursor-pointer">Teacher</Label>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="admin" id="admin" />
-                      <Label htmlFor="admin" className="cursor-pointer">Admin</Label>
-                    </div>
                   </RadioGroup>
                 </div>
 
@@ -171,15 +167,6 @@ const Login = () => {
           </CardContent>
 
           <CardFooter className="flex flex-col gap-4">
-            <div className="text-sm text-muted-foreground text-center">
-              <span>Demo accounts:</span>
-              <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
-                <div>student@example.com</div>
-                <div>teacher@example.com</div>
-                <div>admin@example.com</div>
-                <div className="col-span-3">Password for all: password123</div>
-              </div>
-            </div>
             <div className="text-sm text-center">
               Don't have an account?{" "}
               <Link
@@ -187,6 +174,14 @@ const Login = () => {
                 className="text-edu-primary hover:underline font-medium"
               >
                 Sign up
+              </Link>
+            </div>
+            <div className="text-sm text-center text-muted-foreground">
+              <Link
+                to="/forgot-password"
+                className="hover:underline"
+              >
+                Forgot password? Create a new Account
               </Link>
             </div>
           </CardFooter>
