@@ -181,15 +181,14 @@ def is_already_hashed(pwd: str) -> bool:
 @bp.route('/login', methods=['POST'])
 def login():
     try:
-        # Check for existing authorization and force logout if present
+        # Check for existing authorization
         if 'Authorization' in request.headers:
             try:
                 token = request.headers['Authorization'].split(' ')[1]
                 jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
-                # Force logout existing session
-                logout()
+                logout()  # Force logout existing session
             except:
-                pass  # Ignore invalid tokens
+                pass
 
         data = request.get_json()
         valid, message = validate_input(data, ['email', 'password'])
@@ -204,7 +203,6 @@ def login():
 
         cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
         user = cursor.fetchone()
-        print("Fetched user:", user)
 
         if not user or not check_password_hash(user['hashed_password'], password):
             return jsonify({"error": "Invalid credentials"}), 401
@@ -217,7 +215,7 @@ def login():
             user['name']
         )
         
-        # Store refresh token in database
+        # Store refresh token
         cursor.execute("""
             INSERT INTO refresh_tokens (user_id, token_jti, expires_at, user_agent, ip_address)
             VALUES (%s, %s, %s, %s, %s)
@@ -236,15 +234,21 @@ def login():
         
         conn.commit()
 
+        # Build user response with avatar if exists
+        user_response = {
+            "id": user['id'],
+            "name": user['name'],
+            "email": user['email'],
+            "role": user['role']
+        }
+        
+        if user.get('avatar'):
+            user_response['avatar'] = f"{request.host_url.rstrip('/')}{user['avatar'].lstrip('/')}"
+
         return jsonify({
             "accessToken": access_token,
             "refreshToken": refresh_token,
-            "user": {
-                "id": user['id'],
-                "name": user['name'],
-                "email": user['email'],
-                "role": user['role']
-            }
+            "user": user_response
         })
 
     except Exception as e:
@@ -601,21 +605,42 @@ def upload_avatar(current_user):
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
 
-    filename = secure_filename(file.filename)
+    # Create unique filename
+    file_ext = os.path.splitext(file.filename)[1]
+    filename = f"{current_user['id']}_{uuid.uuid4().hex}{file_ext}"
+    filename = secure_filename(filename)
 
-    # ✅ Add this line to debug the actual save path
-    file_path = os.path.join(current_app.root_path, 'static', 'avatars', filename)
-    print("Saving avatar to:", file_path)  # <--- Add this line
+    # Ensure avatars directory exists
+    avatars_dir = os.path.join(current_app.root_path, 'static', 'avatars')
+    os.makedirs(avatars_dir, exist_ok=True)
 
+    # Save file
+    file_path = os.path.join(avatars_dir, filename)
     file.save(file_path)
 
-    avatar_url = f"/static/avatars/{filename}"
+    # Store relative path in database
+    avatar_path = f"/static/avatars/{filename}"
 
+    # Update database
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET avatar=%s WHERE id=%s", (avatar_url, current_user['id']))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    return jsonify({"message": "Avatar uploaded", "avatarUrl": avatar_url}), 200
+    try:
+        cursor.execute(
+            "UPDATE users SET avatar=%s WHERE id=%s",
+            (avatar_path, current_user['id'])
+        )
+        conn.commit()
+        
+        # Return full URL
+        full_url = f"{request.host_url.rstrip('/')}{avatar_path}"
+        return jsonify({
+            "message": "Avatar uploaded successfully",
+            "avatarUrl": full_url
+        }), 200
+    except Exception as e:
+        conn.rollback()
+        current_app.logger.error(f"Avatar update error: {str(e)}")
+        return jsonify({"error": "Failed to update avatar"}), 500
+    finally:
+        cursor.close()
+        conn.close()
